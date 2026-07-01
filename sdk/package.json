@@ -1,0 +1,14 @@
+{
+  "name": "@zlef/sluice",
+  "version": "1.0.0",
+  "description": "Tiny isomorphic client for a Sluice open-data feed gateway.",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": ["index.js", "README.md"],
+  "keywords": ["open-data", "sluice", "feed", "datasource", "mcp"],
+  "sideEffects": false
+}

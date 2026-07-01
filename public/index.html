@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--zlef-seo-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sluice — open-data source gateway</title>
+<meta name="description" content="Sluice obtains and manages remote data sources (open data) for the whole fleet: self-register a source once, pull a normalized feed. Registry, scheduler, MCP server and JS SDK.">
+<link rel="canonical" href="https://sluice.zlef.fr/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sluice.zlef.fr/">
+<meta property="og:title" content="Sluice — open-data source gateway">
+<meta property="og:description" content="Self-register a remote data source once, pull a normalized feed. Registry · scheduler · MCP · JS SDK.">
+<meta property="og:image" content="https://assets.zlef.fr/og-default.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sluice — open-data source gateway">
+<meta name="twitter:description" content="Self-register a remote data source once, pull a normalized feed.">
+<meta name="twitter:image" content="https://assets.zlef.fr/og-default.png">
+<link rel="icon" href="https://assets.zlef.fr/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="https://assets.zlef.fr/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="https://assets.zlef.fr/apple-touch-icon.png">
+<link rel="manifest" href="https://assets.zlef.fr/site.webmanifest">
+<!--/zlef-seo-->
+<link rel="stylesheet" href="https://da.zlef.fr/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--zl-bg, #06060a); color: var(--zl-text, #e9eae2);
+    font-family: var(--zl-font-sans, ui-sans-serif, system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+  }
+  a { color: var(--zl-accent-soft, #9dae50); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+
+  header.hero { margin-bottom: 2.5rem; }
+  .brand { display: flex; align-items: center; gap: .7rem; }
+  .drop { width: 34px; height: 34px; }
+  h1 { font-size: clamp(2rem, 5vw, 3rem); margin: 0; letter-spacing: -.02em; font-weight: 800; }
+  .lead { color: var(--zl-text-soft, #b6b7ad); font-size: 1.12rem; max-width: 60ch; margin: 1rem 0 0; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.6rem; }
+  .stat {
+    background: var(--zl-surface-1, #0e0e13); border: 1px solid var(--zl-line, rgba(255,255,255,.07));
+    border-radius: 12px; padding: .7rem 1.1rem; min-width: 96px;
+  }
+  .stat b { display: block; font-size: 1.5rem; font-weight: 800; line-height: 1.1; }
+  .stat span { font-size: .78rem; color: var(--zl-text-muted, #7d7e76); text-transform: uppercase; letter-spacing: .06em; }
+
+  .endpoints { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.4rem; }
+  .chip {
+    font-family: var(--zl-font-mono, ui-monospace, monospace); font-size: .8rem;
+    background: var(--zl-surface-2, #15151c); border: 1px solid var(--zl-line, rgba(255,255,255,.07));
+    border-radius: 8px; padding: .35rem .6rem; color: var(--zl-text-soft, #b6b7ad);
+  }
+  .chip b { color: var(--zl-accent-soft, #9dae50); font-weight: 700; }
+
+  h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .1em;
+       color: var(--zl-text-muted, #7d7e76); margin: 2.6rem 0 1rem; font-weight: 700; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+  .card {
+    background: var(--zl-surface-1, #0e0e13); border: 1px solid var(--zl-line, rgba(255,255,255,.07));
+    border-radius: 16px; padding: 1.25rem; position: relative; overflow: hidden;
+    opacity: 0; transform: translateY(8px); animation: rise .5s ease forwards;
+    transition: border-color .2s, transform .2s;
+  }
+  .card:hover { border-color: var(--zl-line-strong, rgba(255,255,255,.13)); transform: translateY(-2px); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  .card .top { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+  .card h3 { margin: 0; font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; }
+  .card .sid { font-family: var(--zl-font-mono, monospace); font-size: .74rem; color: var(--zl-text-muted, #7d7e76); margin-top: .15rem; }
+  .card p.desc { color: var(--zl-text-soft, #b6b7ad); font-size: .9rem; margin: .7rem 0 .9rem; }
+
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; margin-top: .45rem; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
+  .dot.ok { background: #7fbf5a; box-shadow: 0 0 10px 1px rgba(127,191,90,.5); }
+  .dot.error { background: #d98a8a; box-shadow: 0 0 10px 1px rgba(217,138,138,.5); }
+  .dot.pending { background: #c8b06a; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .pills { display: flex; flex-wrap: wrap; gap: .35rem; margin: .2rem 0 .9rem; }
+  .pill { font-size: .72rem; font-family: var(--zl-font-mono, monospace);
+    background: var(--zl-surface-2, #15151c); border: 1px solid var(--zl-line, rgba(255,255,255,.07));
+    border-radius: 6px; padding: .2rem .5rem; color: var(--zl-text-soft, #b6b7ad); }
+  .pill.flow b { color: var(--zl-accent-soft, #9dae50); }
+  .pill.geo { color: var(--zl-accent2-soft, #b095b3); border-color: rgba(176,149,179,.25); }
+
+  .meta-row { display: flex; justify-content: space-between; font-size: .82rem;
+    color: var(--zl-text-muted, #7d7e76); border-top: 1px solid var(--zl-line, rgba(255,255,255,.07));
+    padding-top: .75rem; margin-top: .2rem; }
+  .meta-row b { color: var(--zl-text, #e9eae2); font-weight: 700; }
+  .links { display: flex; gap: .8rem; margin-top: .75rem; font-size: .82rem; font-family: var(--zl-font-mono, monospace); }
+  .prov { font-size: .76rem; color: var(--zl-text-muted, #7d7e76); margin-top: .7rem; }
+  .err { color: #d98a8a; font-size: .8rem; margin-top: .6rem; font-family: var(--zl-font-mono, monospace); word-break: break-word; }
+
+  .skeleton { height: 210px; background: linear-gradient(100deg, var(--zl-surface-1,#0e0e13) 30%, var(--zl-surface-2,#15151c) 50%, var(--zl-surface-1,#0e0e13) 70%);
+    background-size: 200% 100%; animation: shimmer 1.3s infinite; border-radius: 16px; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  footer { margin-top: 3rem; color: var(--zl-text-muted, #7d7e76); font-size: .82rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="brand">
+      <svg class="drop" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2c4 5 7 8.5 7 12a7 7 0 1 1-14 0C5 10.5 8 7 12 2Z" fill="var(--zl-accent, #3e4618)" stroke="var(--zl-accent-soft, #9dae50)" stroke-width="1.3"/>
+      </svg>
+      <h1>Sluice</h1>
+    </div>
+    <p class="lead" data-i18n="lead"></p>
+    <div class="stats" id="stats"></div>
+    <div class="endpoints">
+      <span class="chip"><b>GET</b> /api/feed/<i>:id</i></span>
+      <span class="chip"><b>POST</b> /api/sources</span>
+      <span class="chip"><b>POST</b> /mcp <i data-i18n="mcpChip"></i></span>
+      <span class="chip">SDK <b>@zlef/sluice</b></span>
+    </div>
+  </header>
+
+  <h2 data-i18n="sourcesTitle"></h2>
+  <div class="grid" id="grid">
+    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+  </div>
+
+  <footer>
+    <span data-i18n="footer"></span> · <a href="https://projects.zlef.fr">projects.zlef.fr</a>
+  </footer>
+</div>
+
+<script defer src="https://assets.zlef.fr/track.js"></script>
+<script>
+const I18N = {
+  en: {
+    lead: "Sluice obtains and manages remote data sources for the whole fleet. Apps self-register a source once, then pull a clean, cached, normalized feed — over HTTP, an MCP server or the JS SDK.",
+    mcpChip: "(MCP)", sourcesTitle: "Managed sources",
+    footer: "Open-source open-data gateway",
+    items: "items", updated: "updated", never: "never", pending: "fetching…",
+    feed: "feed", meta: "meta", provBy: "Source",
+  },
+  fr: {
+    lead: "Sluice obtient et gère les sources de données distantes pour toute la flotte. Les applis déclarent une source une fois, puis récupèrent un flux propre, mis en cache et normalisé — via HTTP, un serveur MCP ou le SDK JS.",
+    mcpChip: "(MCP)", sourcesTitle: "Sources gérées",
+    footer: "Passerelle open-data open-source",
+    items: "éléments", updated: "màj", never: "jamais", pending: "récupération…",
+    feed: "flux", meta: "méta", provBy: "Source",
+  },
+};
+const lang = (function () {
+  const c = (document.cookie.match(/(?:^|;\s*)zl-lang=([^;]+)/) || [])[1];
+  const l = c || (navigator.language || 'en').slice(0, 2);
+  return I18N[l] ? l : 'en';
+})();
+const t = I18N[lang];
+document.documentElement.lang = lang;
+document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t[el.dataset.i18n]; });
+
+function ago(iso) {
+  if (!iso) return t.never;
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 90) return lang === 'fr' ? "à l'instant" : 'just now';
+  const m = s / 60; if (m < 90) return Math.round(m) + ' min';
+  const h = m / 60; if (h < 36) return Math.round(h) + ' h';
+  return Math.round(h / 24) + ' j';
+}
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US'));
+
+function card(s, i) {
+  const st = s.status || {};
+  const geo = s.geo ? `<span class="pill geo">geojson</span>` : '';
+  const err = st.error ? `<div class="err">${esc(st.error)}</div>` : '';
+  const cnt = st.state === 'ok' ? `<b>${fmt(st.itemCount)}</b> ${t.items}`
+    : st.state === 'error' ? `<span style="color:#d98a8a">error</span>` : t.pending;
+  const prov = s.homepage
+    ? `<div class="prov">${t.provBy}: <a href="${esc(s.homepage)}" target="_blank" rel="noopener">${esc(s.attribution || s.homepage)}</a></div>`
+    : (s.attribution ? `<div class="prov">${t.provBy}: ${esc(s.attribution)}</div>` : '');
+  return `<div class="card" style="animation-delay:${i * 55}ms">
+    <div class="top">
+      <div>
+        <h3>${esc(s.name)}</h3>
+        <div class="sid">${esc(s.id)}</div>
+      </div>
+      <span class="dot ${esc(st.state)}" title="${esc(st.state)}"></span>
+    </div>
+    <p class="desc">${esc(s.description || '')}</p>
+    <div class="pills">
+      <span class="pill flow">${esc(s.adapter)} → <b>${esc(s.transform)}</b></span>
+      <span class="pill">↻ ${esc(s.refresh)}</span>
+      ${geo}
+    </div>
+    <div class="meta-row"><span>${cnt}</span><span>${t.updated} ${ago(st.fetchedAt)}</span></div>
+    <div class="links">
+      <a href="/api/feed/${encodeURIComponent(s.id)}" target="_blank">${t.feed} →</a>
+      <a href="/api/feed/${encodeURIComponent(s.id)}/meta" target="_blank">${t.meta}</a>
+      ${s.geo ? `<a href="/api/feed/${encodeURIComponent(s.id)}.geojson" target="_blank">geojson</a>` : ''}
+    </div>
+    ${prov}${err}
+  </div>`;
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/sources');
+    const { sources } = await r.json();
+    const ok = sources.filter((s) => s.status.state === 'ok').length;
+    const items = sources.reduce((a, s) => a + (s.status.itemCount || 0), 0);
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><b>${sources.length}</b><span data-s>sources</span></div>
+      <div class="stat"><b>${ok}</b><span>live</span></div>
+      <div class="stat"><b>${fmt(items)}</b><span>${t.items}</span></div>`;
+    document.getElementById('grid').innerHTML = sources.map(card).join('') ||
+      '<p style="color:var(--zl-text-muted)">No sources yet.</p>';
+  } catch (e) {
+    document.getElementById('grid').innerHTML =
+      `<p class="err">Failed to load sources: ${esc(e.message)}</p>`;
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

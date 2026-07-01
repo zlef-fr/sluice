@@ -1,0 +1,16 @@
+services:
+  sluice:
+    build: .
+    container_name: sluice
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=10099
+      - SLUICE_DATA_DIR=/app/data
+    # Write token (SLUICE_TOKEN) gates register/update/delete/refresh.
+    # Reads stay open (it's open data). Token lives in /root/.env.sluice.
+    env_file:
+      - /root/.env.sluice
+    volumes:
+      # persist the source registry + fetched feed snapshots across rebuilds
+      - ./data:/app/data
