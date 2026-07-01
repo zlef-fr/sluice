@@ -116,6 +116,31 @@ consuming app uses at boot.
 Point any MCP client at `POST http://<host>/mcp`. Tools: `list_sources`, `get_source`,
 `get_feed`, `feed_meta`, `search_feed`, `register_source`, `refresh_source`.
 
+## Caching & upstream politeness
+
+Sluice is built to hit upstream providers as little as possible:
+
+- **Served from cache, never live.** Every read (`/api/feed`, `/geojson`, MCP, the SDK) is
+  answered from the warm in-memory/on-disk snapshot. A consumer request *never* triggers an
+  upstream fetch — no matter how many consumers or how often they poll.
+- **One upstream fetch per interval.** A source is re-fetched only on its own `refresh`
+  schedule (e.g. `6h`). `SLUICE_MIN_REFRESH_MS` (default 5 min) is a hard floor so a
+  descriptor can't ask for a punishing cadence.
+- **Restart-aware.** On boot a source is refreshed only if its cached snapshot is older than
+  its interval, so restarts/redeploys don't re-pull.
+- **In-flight dedupe.** Concurrent triggers (a scheduler tick + a manual `/refresh`) collapse
+  into a single upstream request.
+- **Conditional GET.** Sluice stores the upstream `ETag`/`Last-Modified` and sends
+  `If-None-Match`/`If-Modified-Since` on the next refresh. If the upstream answers **304 Not
+  Modified**, the cached feed is kept with no re-download and no re-parse. (Upstreams that
+  don't emit validators simply fall back to a full fetch.)
+- **Client revalidation.** Feed/meta/geojson responses carry `Cache-Control` max-age plus an
+  **ETag**; a consumer revalidating an unchanged feed gets an empty `304`. The SDK's
+  `watch()` polls the tiny `/meta` and only pulls the full feed when the snapshot changes.
+
+`status.fetchedAt` is when the data last *changed*; `status.checkedAt` is when the upstream
+was last *verified* (updated even on a 304).
+
 ## Configuration
 
 | env                    | default                | meaning                              |

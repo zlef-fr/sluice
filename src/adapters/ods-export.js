@@ -5,31 +5,29 @@
 //   source: { base, dataset, select?: [..], where?: "...", limit?: n }
 // e.g. { base: "https://odre.opendatasoft.com", dataset: "bornes-irve",
 //        select: ["nom_operateur","puissance_nominale", ...] }
-import { USER_AGENT } from '../config.js';
 import { toArray } from '../util.js';
+import { conditionalFetch } from './http.js';
 
-export default async function odsExport(descriptor) {
+export default async function odsExport(descriptor, ctx = {}) {
   const s = descriptor.source || {};
-  if (descriptor.url) {
-    // Caller gave a fully-formed export URL — just fetch it.
-    return fetchJson(descriptor.url, descriptor);
+  let url = descriptor.url; // caller may pass a fully-formed export URL
+  if (!url) {
+    if (!s.base || !s.dataset) throw new Error('ods-export needs source.base and source.dataset');
+    const params = new URLSearchParams();
+    if (Array.isArray(s.select) && s.select.length) params.set('select', s.select.join(','));
+    if (s.where) params.set('where', s.where);
+    if (s.limit) params.set('limit', String(s.limit));
+    url = `${s.base.replace(/\/$/, '')}/api/explore/v2.1/catalog/datasets/${encodeURIComponent(
+      s.dataset,
+    )}/exports/json?${params.toString()}`;
   }
-  if (!s.base || !s.dataset) throw new Error('ods-export needs source.base and source.dataset');
-  const params = new URLSearchParams();
-  if (Array.isArray(s.select) && s.select.length) params.set('select', s.select.join(','));
-  if (s.where) params.set('where', s.where);
-  if (s.limit) params.set('limit', String(s.limit));
-  const url = `${s.base.replace(/\/$/, '')}/api/explore/v2.1/catalog/datasets/${encodeURIComponent(
-    s.dataset,
-  )}/exports/json?${params.toString()}`;
-  return fetchJson(url, descriptor);
-}
 
-async function fetchJson(url, descriptor) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...(descriptor.options.headers || {}) },
+  const { res, notModified, validators } = await conditionalFetch(url, {
+    headers: { Accept: 'application/json', ...(descriptor.options.headers || {}) },
+    validators: ctx.validators,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  if (notModified) return { notModified: true, validators };
+
   const buf = Buffer.from(await res.arrayBuffer());
-  return { records: toArray(JSON.parse(buf.toString('utf8'))), bytes: buf.length };
+  return { records: toArray(JSON.parse(buf.toString('utf8'))), bytes: buf.length, validators };
 }

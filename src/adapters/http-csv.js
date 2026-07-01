@@ -3,18 +3,20 @@
 // ("" → ") and newlines inside quotes — enough for the messy real-world CSVs
 // French open-data portals serve.
 // options: { delimiter (default ,), encoding (default utf8) }
-import { USER_AGENT } from '../config.js';
+import { conditionalFetch } from './http.js';
 
-export default async function httpCsv(descriptor) {
-  const res = await fetch(descriptor.url, {
-    headers: { 'User-Agent': USER_AGENT, ...(descriptor.options.headers || {}) },
+export default async function httpCsv(descriptor, ctx = {}) {
+  const { res, notModified, validators } = await conditionalFetch(descriptor.url, {
+    headers: { ...(descriptor.options.headers || {}) },
+    validators: ctx.validators,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${descriptor.url}`);
+  if (notModified) return { notModified: true, validators };
+
   const buf = Buffer.from(await res.arrayBuffer());
   const text = buf.toString(descriptor.options.encoding || 'utf8');
   const delim = descriptor.options.delimiter || ',';
   const rows = parseCsv(text, delim);
-  if (!rows.length) return { records: [], bytes: buf.length };
+  if (!rows.length) return { records: [], bytes: buf.length, validators };
   const header = rows[0];
   const records = [];
   for (let i = 1; i < rows.length; i++) {
@@ -24,7 +26,7 @@ export default async function httpCsv(descriptor) {
     for (let c = 0; c < header.length; c++) obj[header[c]] = r[c] ?? '';
     records.push(obj);
   }
-  return { records, bytes: buf.length };
+  return { records, bytes: buf.length, validators };
 }
 
 function parseCsv(text, delim) {

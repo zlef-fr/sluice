@@ -31,10 +31,11 @@ export function summarize(descriptor) {
       ? {
           state: st.status,
           fetchedAt: st.fetchedAt || null,
+          checkedAt: st.checkedAt || st.fetchedAt || null,
           itemCount: st.itemCount ?? null,
           error: st.error || null,
         }
-      : { state: 'pending', fetchedAt: null, itemCount: null, error: null },
+      : { state: 'pending', fetchedAt: null, checkedAt: null, itemCount: null, error: null },
   };
 }
 

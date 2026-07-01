@@ -4,13 +4,15 @@
 // lets the (usually source-specific) transform do the parse.
 // options: { entry (substring/suffix to select the XML file), encoding (default latin1) }
 import AdmZip from 'adm-zip';
-import { USER_AGENT } from '../config.js';
+import { conditionalFetch } from './http.js';
 
-export default async function httpZipXml(descriptor) {
-  const res = await fetch(descriptor.url, {
-    headers: { 'User-Agent': USER_AGENT, ...(descriptor.options.headers || {}) },
+export default async function httpZipXml(descriptor, ctx = {}) {
+  const { res, notModified, validators } = await conditionalFetch(descriptor.url, {
+    headers: { ...(descriptor.options.headers || {}) },
+    validators: ctx.validators,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${descriptor.url}`);
+  if (notModified) return { notModified: true, validators };
+
   const buf = Buffer.from(await res.arrayBuffer());
   const zip = new AdmZip(buf);
   const want = descriptor.options.entry;
@@ -20,5 +22,5 @@ export default async function httpZipXml(descriptor) {
     : entries.find((e) => e.entryName.endsWith('.xml')) || entries[0];
   if (!entry) throw new Error('no matching entry inside ZIP');
   const raw = entry.getData().toString(descriptor.options.encoding || 'latin1');
-  return { records: [], raw, entryName: entry.entryName, bytes: buf.length };
+  return { records: [], raw, entryName: entry.entryName, bytes: buf.length, validators };
 }
