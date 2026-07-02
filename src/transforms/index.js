@@ -9,12 +9,14 @@ import passthrough from './passthrough.js';
 import declarativeMap from './map.js';
 import fuelEtalab from './fuel-etalab.js';
 import irve from './irve.js';
+import dvfCommunes from './dvf-communes.js';
 
 const TRANSFORMS = {
   passthrough,
   map: (records, descriptor, ctx) => declarativeMap(records, descriptor, ctx, descriptor.transform),
   'fuel-etalab': fuelEtalab,
   irve,
+  'dvf-communes': dvfCommunes,
 };
 
 export function hasTransform(name) {

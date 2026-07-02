@@ -6,7 +6,10 @@
 import { deptFromCP, DEPARTMENTS } from './departments.js';
 import { nowIso } from '../util.js';
 
-const CAP = 20000;
+// Default even-sampling cap on the emitted station count. Overridable per-source
+// via `options.cap` — maps.zlef.fr needs full national coverage (all ~31k
+// stations), while a size-sensitive consumer can request a smaller sample.
+const DEFAULT_CAP = 60000;
 const yes = (v) => v === 'True' || v === true || v === 'true' || v === '1';
 
 const cleanName = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 28);
@@ -15,7 +18,8 @@ const cleanOperator = (s) => {
   return s.replace(/\s+/g, ' ').trim().slice(0, 26);
 };
 
-export default function irve(records) {
+export default function irve(records, descriptor = {}) {
+  const CAP = Number(descriptor?.options?.cap) || DEFAULT_CAP;
   const byStation = new Map();
   for (const r of records) {
     const id = r.id_station_itinerance;

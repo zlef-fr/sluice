@@ -5,12 +5,14 @@ import httpJson from './http-json.js';
 import httpCsv from './http-csv.js';
 import httpZipXml from './http-zip-xml.js';
 import odsExport from './ods-export.js';
+import dvfGeo from './dvf-geo.js';
 
 const ADAPTERS = {
   'http-json': httpJson,
   'http-csv': httpCsv,
   'http-zip-xml': httpZipXml,
   'ods-export': odsExport,
+  'dvf-geo': dvfGeo,
 };
 
 export function hasAdapter(name) {

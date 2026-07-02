@@ -51,4 +51,120 @@ export const SEED_SOURCES = [
     tags: ['france', 'energy', 'ev', 'geo'],
     owner: 'sluice',
   },
+
+  // ── SNCF (train) open data ──────────────────────────────────────────────
+  // Shared by maps.zlef.fr (station point map) and retard.zlef.fr (delay odds +
+  // arc map). Small OpenDataSoft datasets served raw (passthrough) so each
+  // consumer applies its own filtering/aggregation, exactly as before — the only
+  // change is who downloads: Sluice, once, for everyone.
+  {
+    id: 'fr-train-stations',
+    name: 'Gares de voyageurs (SNCF)',
+    description:
+      'Every French railway station (SNCF « liste des gares ») with commune, department, '
+      + 'passenger flag and WGS84 coordinates. Raw fields, unfiltered — filter voyageurs="O" downstream.',
+    adapter: 'ods-export',
+    source: {
+      base: 'https://ressources.data.sncf.com',
+      dataset: 'liste-des-gares',
+      select: ['libelle', 'commune', 'departemen', 'voyageurs', 'c_geo', 'geo_point_2d'],
+    },
+    transform: 'passthrough',
+    refresh: '30d',
+    geo: { lat: 'c_geo.lat', lon: 'c_geo.lon' },
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/liste-des-gares',
+    attribution: 'Liste des gares — SNCF (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'geo'],
+    owner: 'sluice',
+  },
+  {
+    id: 'fr-train-regularity-tgv',
+    name: 'Régularité mensuelle TGV (SNCF/AQST)',
+    description:
+      'Monthly TGV punctuality per origin→destination liaison: trains scheduled/cancelled, '
+      + 'delay buckets (>15/30/60 min), mean delay and cause breakdown. Raw AQST records.',
+    adapter: 'ods-export',
+    source: { base: 'https://ressources.data.sncf.com', dataset: 'regularite-mensuelle-tgv-aqst' },
+    transform: 'passthrough',
+    refresh: '7d',
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/regularite-mensuelle-tgv-aqst',
+    attribution: 'Régularité mensuelle TGV — SNCF / AQST (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'punctuality'],
+    owner: 'sluice',
+  },
+  {
+    id: 'fr-train-regularity-intercites',
+    name: 'Régularité mensuelle Intercités (SNCF)',
+    description:
+      'Monthly Intercités punctuality per liaison: trains scheduled/cancelled and lateness rate. Raw records.',
+    adapter: 'ods-export',
+    source: { base: 'https://ressources.data.sncf.com', dataset: 'regularite-mensuelle-intercites' },
+    transform: 'passthrough',
+    refresh: '7d',
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/regularite-mensuelle-intercites',
+    attribution: 'Régularité mensuelle Intercités — SNCF (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'punctuality'],
+    owner: 'sluice',
+  },
+  {
+    id: 'fr-train-punctuality-transilien',
+    name: 'Ponctualité mensuelle Transilien (SNCF)',
+    description:
+      'Monthly Transilien (Paris RER/suburban) punctuality per line. Raw records.',
+    adapter: 'ods-export',
+    source: { base: 'https://ressources.data.sncf.com', dataset: 'ponctualite-mensuelle-transilien' },
+    transform: 'passthrough',
+    refresh: '7d',
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/ponctualite-mensuelle-transilien',
+    attribution: 'Ponctualité mensuelle Transilien — SNCF (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'punctuality'],
+    owner: 'sluice',
+  },
+  {
+    id: 'fr-train-regularity-ter',
+    name: 'Régularité mensuelle TER (SNCF)',
+    description:
+      'Monthly TER punctuality per region. Raw records.',
+    adapter: 'ods-export',
+    source: { base: 'https://ressources.data.sncf.com', dataset: 'regularite-mensuelle-ter' },
+    transform: 'passthrough',
+    refresh: '7d',
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/regularite-mensuelle-ter',
+    attribution: 'Régularité mensuelle TER — SNCF (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'punctuality'],
+    owner: 'sluice',
+  },
+
+  // ── DVF (property prices) ───────────────────────────────────────────────
+  // The shared French real-estate price source for foncier.zlef.fr, m2.zlef.fr
+  // and heat.zlef.fr. The upstream is ~100 MB/year × 5 years of raw transactions;
+  // the `dvf-geo` adapter streams + aggregates it to a compact per-commune × year
+  // median €/m² table (≈33k records), computed once here for the whole fleet.
+  {
+    id: 'fr-dvf-communes',
+    name: 'Valeurs foncières par commune (DVF)',
+    description:
+      'Median residential price €/m² per French commune and year (2021–2025), from Etalab '
+      + 'geo-dvf: sales of flats/houses, surface > 9 m², 500–30000 €/m². Per-commune overall / '
+      + 'flat (a) / house (m) medians + sale count; department & national medians in meta.',
+    adapter: 'dvf-geo',
+    source: {
+      base: 'https://files.data.gouv.fr/geo-dvf/latest/csv',
+      file: 'full.csv.gz',
+      years: [2021, 2022, 2023, 2024, 2025],
+    },
+    transform: 'dvf-communes',
+    refresh: '30d',
+    geo: { lat: 'lat', lon: 'lon' },
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://files.data.gouv.fr/geo-dvf/latest/csv/',
+    attribution: 'Demandes de valeurs foncières (DVF) — Etalab / DGFiP (geo-dvf)',
+    tags: ['france', 'realestate', 'dvf', 'geo'],
+    owner: 'sluice',
+  },
 ];
