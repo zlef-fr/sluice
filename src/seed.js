@@ -6,6 +6,37 @@
 // Seeds are (re)written on every boot so upgrades to the descriptor ship with
 // the code; user-registered sources are never touched.
 export const SEED_SOURCES = [
+  // ── INSEE consumer prices (inflation) ───────────────────────────────────
+  // The French CPI (IPC). Not one document: the all-items index plus COICOP
+  // division sub-indices and their weights, each a separate melodi query. The
+  // `melodi-ipc` adapter assembles them into one flat feed of self-describing
+  // series records (2 all-items + 13 divisions). Consumed by inflation.zlef.fr.
+  {
+    id: 'fr-insee-ipc',
+    name: 'Indice des prix à la consommation (IPC, INSEE)',
+    description:
+      'French Consumer Price Index from INSEE (melodi DS_IPC_PRINC, base 2025=100, France, all '
+      + 'households, non seasonally adjusted): all-items index (annual since 1996 + monthly) and the '
+      + '13 COICOP-2018 division sub-indices with their latest expenditure weights. One record per '
+      + 'series: {kind, freq, code?, weight?, values:{period:index}}. Year-on-year is computed downstream.',
+    adapter: 'melodi-ipc',
+    source: {
+      api: 'https://api.insee.fr/melodi/data',
+      dataflow: 'DS_IPC_PRINC',
+      geo: '2025-FRANCE-F',
+      tph: '_T',
+      seasonalAdjust: 'N',
+      base: '2025 = 100',
+      divisions: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13'],
+    },
+    transform: 'ipc',
+    refresh: '7d',
+    license: 'Licence Ouverte 2.0 (Etalab)',
+    homepage: 'https://www.insee.fr/fr/statistiques/serie/000436387',
+    attribution: 'Indice des prix à la consommation — INSEE (Licence Ouverte 2.0)',
+    tags: ['france', 'economy', 'inflation', 'prices', 'insee'],
+    owner: 'sluice',
+  },
   {
     id: 'fr-fuel-prices',
     name: 'Prix des carburants (France)',

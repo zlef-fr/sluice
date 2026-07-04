@@ -10,6 +10,7 @@ import declarativeMap from './map.js';
 import fuelEtalab from './fuel-etalab.js';
 import irve from './irve.js';
 import dvfCommunes from './dvf-communes.js';
+import ipc from './ipc.js';
 
 const TRANSFORMS = {
   passthrough,
@@ -17,6 +18,7 @@ const TRANSFORMS = {
   'fuel-etalab': fuelEtalab,
   irve,
   'dvf-communes': dvfCommunes,
+  ipc,
 };
 
 export function hasTransform(name) {
