@@ -109,6 +109,33 @@ export const SEED_SOURCES = [
     tags: ['france', 'transport', 'train', 'geo'],
     owner: 'sluice',
   },
+  // ── SNCF lost property (the Lost & Found Museum) ────────────────────────
+  // « Objets trouvés, restitution » is >1.5M rows, so the sncf-lost adapter
+  // aggregates INLINE via the OpenDataSoft v2.1 API (group_by facets + counts +
+  // a recent sample) and emits one compact museum feed — never the whole table.
+  // Consumed by lost.zlef.fr.
+  {
+    id: 'fr-lost-objects',
+    name: 'Objets trouvés dans les gares (SNCF)',
+    description:
+      'Every object found in an SNCF station or train and declared in the lost-property system, '
+      + 'with its return date when reclaimed. Aggregated inline (by object type, nature, station, '
+      + 'year + a recent sample) — never the whole 1.5M-row table.',
+    adapter: 'sncf-lost',
+    source: {
+      base: 'https://ressources.data.sncf.com',
+      dataset: 'objets-trouves-restitution',
+      sample: 150,
+    },
+    transform: 'sncf-lost',
+    refresh: '24h',
+    geo: false,
+    license: 'Licence Ouverte / Etalab',
+    homepage: 'https://ressources.data.sncf.com/explore/dataset/objets-trouves-restitution',
+    attribution: 'Objets trouvés, restitution — SNCF (Licence Ouverte)',
+    tags: ['france', 'transport', 'train', 'sncf', 'lost-and-found'],
+    owner: 'sluice',
+  },
   {
     id: 'fr-train-regularity-tgv',
     name: 'Régularité mensuelle TGV (SNCF/AQST)',
