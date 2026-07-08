@@ -3,6 +3,8 @@
 // init transforms → schedule + refresh → serve API + MCP + dashboard.
 import express from 'express';
 import compression from 'compression';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import { PORT, REPO_URL } from './config.js';
 import { loadRegistry, warmFeeds, getDescriptor, putDescriptor } from './store.js';
@@ -10,11 +12,18 @@ import { normalizeDescriptor } from './registry.js';
 import { initTransforms } from './transforms/index.js';
 import { bootScheduler } from './scheduler.js';
 import { SEED_SOURCES } from './seed.js';
+import { SEED_DASHBOARDS } from './seed-dashboards.js';
+import { loadDashboards, getDashboard, putDashboard, normalizeDashboard } from './dashboards.js';
 import { listSources } from './service.js';
 
 import sourcesRouter from './routes/sources.js';
 import feedRouter from './routes/feed.js';
+import exploreRouter from './routes/explore.js';
+import dashboardsRouter from './routes/dashboards.js';
+import dashboardRouter from './routes/dashboard.js';
 import mcpRouter from './routes/mcp.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // (Re)write the batteries-included sources every boot, preserving createdAt and
 // never touching user-registered ids.
@@ -30,9 +39,25 @@ async function seed() {
   }
 }
 
+// (Re)write the built-in dashboard configs each boot, preserving createdAt and
+// never touching user-registered ids.
+async function seedDashboards() {
+  for (const c of SEED_DASHBOARDS) {
+    const existing = getDashboard(c.id);
+    const norm = normalizeDashboard({ ...c, createdAt: existing?.createdAt }, { existing });
+    if (!norm.ok) {
+      console.error(`[sluice] dashboard "${c.id}" invalid: ${norm.error}`);
+      continue;
+    }
+    await putDashboard(norm.config);
+  }
+}
+
 async function main() {
   await loadRegistry();
   await seed();
+  await loadDashboards();
+  await seedDashboards();
   await warmFeeds();
   await initTransforms();
 
@@ -62,7 +87,17 @@ async function main() {
 
   app.use('/api/sources', sourcesRouter);
   app.use('/api/feed', feedRouter);
+  app.use('/api/explore', exploreRouter);
+  app.use('/api/dashboards', dashboardsRouter);
   app.use('/mcp', mcpRouter);
+
+  // Themeable exploration dashboards: static client assets + the SSR'd shell.
+  // Static mount is registered before /d/:id so `_assets` isn't captured as an id.
+  app.use('/d/_assets', express.static(join(__dirname, 'public', 'dashboard'), {
+    maxAge: '1h',
+    setHeaders: (res) => res.set('Access-Control-Allow-Origin', '*'),
+  }));
+  app.use('/d', dashboardRouter);
 
   // Sluice is an API/MCP service, not a website — no landing page. The root
   // just points a human at the docs (the repo README).

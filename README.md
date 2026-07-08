@@ -205,6 +205,15 @@ depends on them being present.
 | GET    | `/api/feed/:id`               | read   | full feed `{fetchedAt,meta,data}`|
 | GET    | `/api/feed/:id/meta`          | read   | metadata only                    |
 | GET    | `/api/feed/:id.geojson`       | read   | GeoJSON projection               |
+| GET    | `/api/explore/:id`            | read   | filter/sort/page/facet/search    |
+| GET    | `/api/explore/:id/record/:rid`| read   | one record by id field           |
+| GET    | `/api/explore/:id/points`     | read   | compact geo points for a map     |
+| GET    | `/api/dashboards`             | read   | list dashboard configs           |
+| GET    | `/api/dashboards/:id`         | read   | one dashboard config             |
+| POST   | `/api/dashboards`             | write  | register/replace a dashboard     |
+| PUT    | `/api/dashboards/:id`         | write  | update by id                     |
+| DELETE | `/api/dashboards/:id`         | write  | remove                           |
+| GET    | `/d/:id`                      | —      | themed exploration dashboard SPA |
 | POST   | `/mcp`                        | —      | MCP JSON-RPC (Streamable HTTP)   |
 | GET    | `/healthz`                    | —      | health                           |
 
@@ -229,6 +238,47 @@ consuming app uses at boot.
 
 Point any MCP client at `POST http://<host>/mcp`. Tools: `list_sources`, `get_source`,
 `get_feed`, `feed_meta`, `search_feed`, `register_source`, `refresh_source`.
+
+## Exploration & dashboards
+
+`/api/feed/:id` dumps a whole snapshot; `/api/explore/:id` lets a client **query** it —
+filter, sort, paginate, facet, range-stat and full-text search — over the warm in-memory
+records, no database. It's the same engine that powers Sluice's zero-frontend dashboards.
+
+```
+GET /api/explore/fr-fuel-prices
+      ?q=lyon&qf=v,a               full-text over fields v,a
+      &eq.b=TotalEnergies          term filter (repeat / comma = OR within a field)
+      &min.p.gazole=1.9            numeric range (dot-paths ok)
+      &sort=-p.gazole&page=1&pageSize=50
+      &facets=b,d                  → value+count buckets per field
+      &stats=p.gazole              → {min,max,avg,count,bins} (histogram-ready)
+→ { total, filtered, page, pages, rows, facets, stats }
+```
+
+A **dashboard** is a second kind of registered object: a JSON config that says how to
+*present* a feed (theme palette, i18n copy, facets, numeric metrics, table columns, a
+record-detail layout, a geo map, overview charts). Register one and Sluice serves a fully
+themeable, deep-linkable exploration SPA at `/d/:id` — no per-app frontend to write. The
+same generic UI skins completely from `theme.palette` (injected as CSS custom properties)
+so it wears the consuming app's brand, not Sluice's.
+
+```bash
+curl -X POST http://127.0.0.1:10099/api/dashboards \
+  -H "x-sluice-token: $SLUICE_TOKEN" -H 'content-type: application/json' \
+  -d '{ "id":"my-app", "feed":"fr-fuel-prices",
+        "theme":{"palette":{"bg":"#fff7ea","ink":"#241247","accent":"#ffb400"}},
+        "facets":[{"field":"b","label":{"en":"Brand","fr":"Enseigne"}}],
+        "metrics":[{"field":"p.gazole","label":"Diesel","format":"price"}] }'
+# → served at /d/my-app
+```
+
+Every dashboard URL is a deep link: `?view=table&eq.b=TotalEnergies&sort=-p.gazole` opens
+filtered + sorted, and `?record=<id>` opens straight on that record's detail — so an app can
+link a user from whatever they clicked into the matching exploration view. A config may also
+declare `"hosts":["data.myapp.example"]`; point that hostname's edge at Sluice and
+`/api/dashboards/by-host/:host` resolves it, so the dashboard lives on the app's own domain.
+See `src/seed-dashboards.js` for a complete reference config (`essence-fuel`).
 
 ## Caching & upstream politeness
 
