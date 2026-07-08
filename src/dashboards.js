@@ -108,15 +108,11 @@ export function normalizeDashboard(input, { existing } = {}) {
     hosts: Array.isArray(input.hosts) ? input.hosts.map(String).slice(0, 8) : [],
     locales: Array.isArray(input.locales) && input.locales.length ? input.locales : ['en', 'fr'],
     defaultLocale: input.defaultLocale || 'en',
-    theme: {
-      palette: theme.palette || {},
-      font: theme.font || 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-      fontDisplay: theme.fontDisplay || theme.font || 'system-ui, sans-serif',
-      fontUrl: theme.fontUrl || '',
-      radius: theme.radius || '14px',
-      ...theme,
-    },
-    branding: input.branding || {},
+    // Theme values are interpolated into a <style> block, and branding.homeUrl
+    // into an href — both are sanitized here (not just esc()'d) so a registered
+    // config can't break out of the CSS context or smuggle a javascript: URL.
+    theme: sanitizeTheme(theme),
+    branding: { ...(input.branding || {}), homeUrl: safeHttpUrl(input.branding?.homeUrl) },
     i18n: input.i18n || {},
     record: input.record || { title: input.idField || 'id' },
     search: input.search || { fields: [] },
@@ -134,4 +130,42 @@ export function normalizeDashboard(input, { existing } = {}) {
 
 function err(error) {
   return { ok: false, error };
+}
+
+// ── theme / URL sanitization ──────────────────────────────────────────────────
+// Theme values reach a server-rendered <style> block and branding.homeUrl reaches
+// an href, so escaping isn't enough — we allowlist them. Anything that doesn't
+// match a safe CSS colour / length / font-stack shape is dropped (the app.css
+// default then applies), and URLs must parse as http(s). Blocks <style> breakout,
+// extra declarations, url()/expression() and javascript: URIs at registration.
+const RE_COLOR = /^#[0-9a-fA-F]{3,8}$|^(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix)\([0-9a-zA-Z%.,/ #+-]*\)$|^[a-zA-Z]{3,24}$/;
+const RE_LEN = /^[0-9]+(?:\.[0-9]+)?(?:px|rem|em|%)?$/;
+const RE_FONT = /^[a-zA-Z0-9 ,."'_-]+$/;
+
+function safeHttpUrl(v) {
+  if (!v) return '';
+  try {
+    const u = new URL(String(v));
+    return /^https?:$/.test(u.protocol) ? u.href : '';
+  } catch { return ''; }
+}
+
+function sanitizeTheme(theme = {}) {
+  const p = theme.palette || {};
+  const palette = {};
+  for (const k in p) {
+    if (p[k] == null) continue;
+    const val = String(p[k]).trim();
+    if (RE_COLOR.test(val)) palette[k] = val; // else drop → app.css default wins
+  }
+  const font = typeof theme.font === 'string' && RE_FONT.test(theme.font.trim()) ? theme.font.trim() : '';
+  const fontDisplay = typeof theme.fontDisplay === 'string' && RE_FONT.test(theme.fontDisplay.trim()) ? theme.fontDisplay.trim() : '';
+  const radius = typeof theme.radius === 'string' && RE_LEN.test(theme.radius.trim()) ? theme.radius.trim() : '';
+  return {
+    palette,
+    font: font || 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    fontDisplay: fontDisplay || font || 'system-ui, sans-serif',
+    fontUrl: safeHttpUrl(theme.fontUrl),
+    radius: radius || '14px',
+  };
 }
