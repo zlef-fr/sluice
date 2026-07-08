@@ -9,7 +9,9 @@ export const ROOT = join(__dirname, '..');
 export const DATA_DIR = process.env.SLUICE_DATA_DIR || join(ROOT, 'data');
 export const SOURCES_FILE = join(DATA_DIR, 'sources.json');
 export const FEEDS_DIR = join(DATA_DIR, 'feeds');
-export const PUBLIC_DIR = join(ROOT, 'public');
+
+// Root path redirects here — Sluice has no landing page; the docs are the repo.
+export const REPO_URL = process.env.SLUICE_REPO_URL || 'https://github.com/zlef-fr/sluice';
 
 export const PORT = Number(process.env.PORT || 10099);
 

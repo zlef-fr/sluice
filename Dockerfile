@@ -3,7 +3,6 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 COPY src ./src
-COPY public ./public
 ENV PORT=10099
 ENV SLUICE_DATA_DIR=/app/data
 EXPOSE 10099

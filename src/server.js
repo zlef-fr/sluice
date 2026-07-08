@@ -4,7 +4,7 @@
 import express from 'express';
 import compression from 'compression';
 
-import { PORT, PUBLIC_DIR } from './config.js';
+import { PORT, REPO_URL } from './config.js';
 import { loadRegistry, warmFeeds, getDescriptor, putDescriptor } from './store.js';
 import { normalizeDescriptor } from './registry.js';
 import { initTransforms } from './transforms/index.js';
@@ -64,7 +64,9 @@ async function main() {
   app.use('/api/feed', feedRouter);
   app.use('/mcp', mcpRouter);
 
-  app.use(express.static(PUBLIC_DIR, { maxAge: '1h', extensions: ['html'] }));
+  // Sluice is an API/MCP service, not a website — no landing page. The root
+  // just points a human at the docs (the repo README).
+  app.get('/', (_req, res) => res.redirect(302, REPO_URL));
 
   app.listen(PORT, () => console.log(`[sluice] listening on :${PORT}`));
 
