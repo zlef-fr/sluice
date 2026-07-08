@@ -11,6 +11,7 @@ import fuelEtalab from './fuel-etalab.js';
 import irve from './irve.js';
 import dvfCommunes from './dvf-communes.js';
 import ipc from './ipc.js';
+import sncfLost from './sncf-lost.js';
 
 const TRANSFORMS = {
   passthrough,
@@ -19,6 +20,7 @@ const TRANSFORMS = {
   irve,
   'dvf-communes': dvfCommunes,
   ipc,
+  'sncf-lost': sncfLost,
 };
 
 export function hasTransform(name) {

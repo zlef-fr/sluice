@@ -7,6 +7,7 @@ import httpZipXml from './http-zip-xml.js';
 import odsExport from './ods-export.js';
 import dvfGeo from './dvf-geo.js';
 import melodiIpc from './melodi-ipc.js';
+import sncfLost from './sncf-lost.js';
 
 const ADAPTERS = {
   'http-json': httpJson,
@@ -15,6 +16,7 @@ const ADAPTERS = {
   'ods-export': odsExport,
   'dvf-geo': dvfGeo,
   'melodi-ipc': melodiIpc,
+  'sncf-lost': sncfLost,
 };
 
 export function hasAdapter(name) {
