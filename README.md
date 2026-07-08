@@ -17,7 +17,81 @@ normalized feed**. Sluice does the fetching, parsing, enrichment, scheduling and
 - 🤖 **MCP server** — every source is discoverable and pullable as a tool by Claude / agents.
 - 📦 **JS SDK** — `@zlef/sluice`, isomorphic, dependency-free.
 
-Plain Node + Express, JSON-on-disk (no database). `npm i && npm start`.
+Plain Node + Express, JSON-on-disk (no database), zero config to boot.
+
+---
+
+## Quick start
+
+**Requirements:** Node.js ≥ 18 (uses the global `fetch` / `Readable.fromWeb`). No database.
+
+### Run locally
+
+```bash
+git clone https://github.com/zlef-fr/sluice.git
+cd sluice
+npm install
+npm start                       # listens on :10099
+```
+
+That's it — Sluice boots with a set of ready-to-use open-data feeds already
+registered (see [Seeded feeds](#seeded-feeds)) and starts serving immediately:
+
+```bash
+curl http://localhost:10099/healthz
+curl http://localhost:10099/api/sources            # what's registered
+curl http://localhost:10099/api/feed/fr-fuel-prices | head -c 400
+```
+
+By default **reads are open and writes are disabled** (no token set), so the
+instance is safe to run as a read-only mirror out of the box. To allow
+registering/updating sources, set a write token (see [below](#enabling-writes)).
+
+### Run with Docker
+
+```bash
+docker compose up -d --build     # uses the bundled docker-compose.yml
+# or, plain docker:
+docker build -t sluice .
+docker run -d --name sluice -p 10099:10099 -v "$PWD/data:/app/data" sluice
+```
+
+The `data/` volume holds the source registry (`sources.json`) and the cached
+feed snapshots — persist it across rebuilds.
+
+### Enabling writes
+
+Register/update/delete/refresh are gated by a token. Set it and pass it back on
+write calls:
+
+```bash
+SLUICE_TOKEN=$(openssl rand -hex 24) npm start
+```
+
+```bash
+curl -X POST http://localhost:10099/api/sources \
+  -H "x-sluice-token: $SLUICE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{
+    "id": "demo-quakes",
+    "name": "USGS earthquakes (M2.5+, last day)",
+    "adapter": "http-json",
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    "options": { "path": "features" },
+    "transform": { "type": "map",
+      "fields": { "id": "id", "mag": "properties.mag", "place": "properties.place",
+                  "lon": "geometry.coordinates.0", "lat": "geometry.coordinates.1" },
+      "number": ["mag", "lat", "lon"], "required": ["lat", "lon"] },
+    "geo": { "lat": "lat", "lon": "lon" },
+    "refresh": "15m"
+  }'
+
+curl http://localhost:10099/api/feed/demo-quakes
+curl http://localhost:10099/api/feed/demo-quakes.geojson   # map-ready
+```
+
+See [Configuration](#configuration) for every env var. Nothing is hard-coded —
+paths, port and tokens are all env-driven, so the service is fully portable.
 
 ---
 
@@ -48,6 +122,15 @@ A **source descriptor** is the contract you register:
 | `http-csv`      | CSV/TSV (`options.delimiter`, `options.encoding`)  |
 | `http-zip-xml`  | XML inside a ZIP → raw XML string handed to the transform |
 | `ods-export`    | OpenDataSoft Explore export (`source:{base,dataset,select,where}`) |
+| `dvf-geo`       | streams the French DVF `full.csv.gz` per year and aggregates inline (a heavy raw source must aggregate in the adapter, not hand millions of rows to a transform) |
+| `melodi-ipc`    | INSEE *melodi* SDMX API — assembles a multi-query index (all-items + COICOP sub-indices + weights) into one flat feed, with polite `429`/`503` backoff |
+| `sncf-lost`     | SNCF lost-property ODS dataset, aggregated inline (avoids the 1.5M-row raw table) |
+
+Adapters live in `src/adapters/` and return raw records; drop a new file in that
+folder and register it in `src/adapters/index.js` to add your own. The
+`http-json`/`http-csv`/`http-zip-xml` adapters cover most sources — reach for a
+dedicated adapter only when a source is too heavy to normalize downstream (`dvf-geo`)
+or needs multi-request assembly (`melodi-ipc`).
 
 **Transforms** normalize raw records into the feed:
 
@@ -56,7 +139,14 @@ A **source descriptor** is the contract you register:
 | `passthrough` | emit records unchanged                                          |
 | `map`         | declarative rename / pluck / number-coerce / filter / sample   |
 | `fuel-etalab` | parse the French fuel feed, enrich with dept + OSM brand       |
-| `irve`        | aggregate French EV charge points → stations                   |
+| `irve`        | aggregate French EV charge points → stations (`options.cap` sampling) |
+| `dvf-communes`| lift the `dvf-geo` adapter's per-dept/national extras into feed meta |
+| `ipc`         | pass INSEE IPC series through, lift assembled base/geo/ranges meta |
+| `sncf-lost`   | shape the aggregated SNCF lost-property records                 |
+
+For a clean source, prefer the inline `map` transform — no code. Write a named
+transform (a file in `src/transforms/`, registered in its `index.js`) only when
+normalization needs real logic or enrichment.
 
 The `map` transform is inline — no code needed for clean sources:
 
@@ -77,6 +167,30 @@ The `map` transform is inline — no code needed for clean sources:
   "refresh": "15m"
 }
 ```
+
+## Seeded feeds
+
+A fresh instance ships with these open-data feeds already registered (they're
+ordinary descriptors, rewritten on every boot from `src/seed.js`; your own
+self-registered sources are never touched). Pull any of them at
+`/api/feed/<id>` — no token needed.
+
+| id                              | what                                             | source |
+|---------------------------------|--------------------------------------------------|--------|
+| `fr-fuel-prices`                | live French fuel prices per station              | Etalab (roulez-éco) |
+| `fr-ev-chargers`                | French EV charge points → stations               | IRVE / transport.data.gouv |
+| `fr-train-stations`             | French railway station list (+ geo)              | SNCF Open Data |
+| `fr-train-regularity-tgv`       | TGV monthly regularity                           | SNCF Open Data |
+| `fr-train-regularity-intercites`| Intercités monthly regularity                    | SNCF Open Data |
+| `fr-train-regularity-ter`       | TER monthly regularity                           | SNCF Open Data |
+| `fr-train-punctuality-transilien`| Transilien punctuality                          | SNCF Open Data |
+| `fr-lost-objects`               | SNCF lost-property, aggregated                   | SNCF Open Data |
+| `fr-dvf-communes`               | per-commune median €/m² real-estate, by year     | DGFiP DVF (geo) |
+| `fr-insee-ipc`                  | French CPI (all-items + COICOP divisions)        | INSEE (melodi) |
+
+All are French open data under *Licence Ouverte / Etalab*. Trim or replace the
+`SEED_SOURCES` array in `src/seed.js` for a different fleet — nothing else
+depends on them being present.
 
 ## HTTP API
 
