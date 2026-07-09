@@ -39,7 +39,12 @@ export function fmtValue(value, spec, meta, locale) {
   }
   if (fmt === 'number' || typeof value === 'number') {
     const n = Number(value);
-    if (Number.isFinite(n)) return n.toLocaleString(locale, { maximumFractionDigits: 3 });
+    if (Number.isFinite(n)) {
+      // At most 1 decimal — 3 decimals with a locale comma (e.g. fr "59,418")
+      // reads like thousands and misleads on averages.
+      const s = n.toLocaleString(locale, { maximumFractionDigits: 1 });
+      return spec?.unit ? `${s} ${spec.unit}` : s;
+    }
   }
   return String(value);
 }

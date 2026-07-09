@@ -11,13 +11,22 @@ export function createScatter(canvas, { ramp, onPick }) {
   let bbox = null;
   let highlight = null;    // id to ring (detail mini-map)
 
+  // Frame the main cluster with Tukey (IQR) fences rather than min/max or fixed
+  // percentiles: outliers are usually asymmetric (e.g. France's overseas communes
+  // are all far south, more than any small fixed % trims), and IQR fences adapt to
+  // the distribution — they keep metropole + Corsica but clip the far-flung points,
+  // which then render off-canvas. Fences are clamped to the real data extent so a
+  // clean single-cluster dataset (no outliers) is unaffected.
+  function tukey(sorted) {
+    const q = (f) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(f * (sorted.length - 1))))];
+    const q1 = q(0.25), q3 = q(0.75), iqr = q3 - q1;
+    const lo = Math.max(sorted[0], q1 - 1.5 * iqr);
+    const hi = Math.min(sorted[sorted.length - 1], q3 + 1.5 * iqr);
+    return [lo, hi];
+  }
   function computeBbox(points) {
-    let laMin = Infinity, laMax = -Infinity, loMin = Infinity, loMax = -Infinity;
-    for (const p of points) {
-      const la = p[1], lo = p[2];
-      if (la < laMin) laMin = la; if (la > laMax) laMax = la;
-      if (lo < loMin) loMin = lo; if (lo > loMax) loMax = lo;
-    }
+    const [laMin, laMax] = tukey(points.map((p) => p[1]).sort((a, b) => a - b));
+    const [loMin, loMax] = tukey(points.map((p) => p[2]).sort((a, b) => a - b));
     const pad = 0.04;
     const dLa = (laMax - laMin) || 1, dLo = (loMax - loMin) || 1;
     return { laMin: laMin - dLa * pad, laMax: laMax + dLa * pad, loMin: loMin - dLo * pad, loMax: loMax + dLo * pad };

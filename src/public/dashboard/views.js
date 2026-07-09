@@ -30,7 +30,7 @@ export function viewTabs(state, config, locale) {
   const tabs = [['overview', u.overview], ['table', u.table]];
   if (config.map) tabs.push(['map', u.map]);
   return tabs.map(([id, label]) =>
-    `<button class="sl-tab" role="tab" data-view="${id}" aria-selected="${state.view === id}">${esc(label)}</button>`
+    `<button class="sl-tab" role="tab" data-role="view" data-view="${id}" aria-selected="${state.view === id}">${esc(label)}</button>`
   ).join('');
 }
 

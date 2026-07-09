@@ -248,18 +248,16 @@ export function geoPoints(payload, query, { lat, lon, color, idField = 'id', cap
     for (let i = 0; i < withGeo.length; i += stride) points.push(withGeo[Math.floor(i)]);
   }
 
-  let min = Infinity, max = -Infinity;
-  for (const p of points) {
-    if (p[3] == null) continue;
-    if (p[3] < min) min = p[3];
-    if (p[3] > max) max = p[3];
+  // Colour range from the 5th–95th percentile (not raw min/max) so a few extreme
+  // values don't collapse the ramp to one flat colour. The ramp clamps out-of-range.
+  const cvals = points.map((p) => p[3]).filter((v) => v != null).sort((a, b) => a - b);
+  let colorRange = null;
+  if (cvals.length) {
+    const q = (f) => cvals[Math.min(cvals.length - 1, Math.max(0, Math.floor(f * (cvals.length - 1))))];
+    colorRange = { min: q(0.05), max: q(0.95) };
+    if (colorRange.min === colorRange.max) colorRange = { min: cvals[0], max: cvals[cvals.length - 1] };
   }
-  return {
-    points,
-    cap,
-    count: withGeo.length,
-    color: Number.isFinite(min) ? { min, max } : null,
-  };
+  return { points, cap, count: withGeo.length, color: colorRange };
 }
 
 // ── query parsing ─────────────────────────────────────────────────────────────

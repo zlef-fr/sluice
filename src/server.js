@@ -94,8 +94,14 @@ async function main() {
   // Themeable exploration dashboards: static client assets + the SSR'd shell.
   // Static mount is registered before /d/:id so `_assets` isn't captured as an id.
   app.use('/d/_assets', express.static(join(__dirname, 'public', 'dashboard'), {
-    maxAge: '1h',
-    setHeaders: (res) => res.set('Access-Control-Allow-Origin', '*'),
+    // Revalidate every load: ES-module imports (app.js → ./views.js …) can't be
+    // cache-busted with a ?v= query, so a deploy would otherwise stay shadowed by
+    // a stale CF/browser copy. ETag makes revalidation a cheap 304.
+    etag: true,
+    setHeaders: (res) => {
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Cache-Control', 'no-cache');
+    },
   }));
   app.use('/d', dashboardRouter);
 
