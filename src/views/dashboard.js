@@ -36,7 +36,8 @@ function themeStyle(theme) {
   return `:root{${lines.join('')}}`;
 }
 
-export function renderDashboard({ config, locale, meta, initial, requestPath, siteBase }) {
+export function renderDashboard({ config, locale, meta, initial, requestPath, siteBase, assetVersion }) {
+  const v = assetVersion ? `?v=${assetVersion}` : '';
   const t = config.i18n?.[locale] || config.i18n?.en || {};
   const title = pick(t.title, locale) || config.name;
   const subtitle = pick(t.subtitle, locale) || '';
@@ -82,7 +83,7 @@ export function renderDashboard({ config, locale, meta, initial, requestPath, si
 <!--/zlef-seo-->
 <meta name="theme-color" content="${esc(config.theme.palette?.accent || '#111')}">
 ${fontLink}
-<link rel="stylesheet" href="/d/_assets/app.css">
+<link rel="stylesheet" href="/d/_assets/app.css${v}">
 <!-- theme injected AFTER app.css so the config palette wins the :root cascade -->
 <style>${themeStyle(config.theme)}</style>
 </head>
@@ -126,7 +127,7 @@ ${fontLink}
 <div class="sl-modal" id="sl-modal" hidden><div class="sl-modal-card" role="dialog" aria-modal="true"></div></div>
 
 <script>window.__SLUICE__=${boot};</script>
-<script type="module" src="/d/_assets/app.js"></script>
+<script src="/d/_assets/dashboard.bundle.js${v}" defer></script>
 </body>
 </html>`;
 }

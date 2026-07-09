@@ -22,6 +22,7 @@ import exploreRouter from './routes/explore.js';
 import dashboardsRouter from './routes/dashboards.js';
 import dashboardRouter from './routes/dashboard.js';
 import mcpRouter from './routes/mcp.js';
+import { getBundle } from './dashboard-bundle.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -91,8 +92,20 @@ async function main() {
   app.use('/api/dashboards', dashboardsRouter);
   app.use('/mcp', mcpRouter);
 
-  // Themeable exploration dashboards: static client assets + the SSR'd shell.
-  // Static mount is registered before /d/:id so `_assets` isn't captured as an id.
+  // Themeable exploration dashboards. The client ships as ONE content-hash-
+  // versioned bundle (built from the ES-module sources at boot, served from
+  // memory) so a deploy auto-busts CF + the browser — the SSR references it as
+  // /d/_assets/dashboard.bundle.js?v=<hash>. Registered before the static mount.
+  getBundle(); // prime the cache so the first request is instant
+  app.get('/d/_assets/dashboard.bundle.js', (_req, res) => {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable'); // URL is versioned
+    res.send(getBundle().code);
+  });
+
+  // Static mount (app.css + the module sources the bundle is built from). Registered
+  // before /d/:id so `_assets` isn't captured as an id.
   app.use('/d/_assets', express.static(join(__dirname, 'public', 'dashboard'), {
     // Revalidate every load: ES-module imports (app.js → ./views.js …) can't be
     // cache-busted with a ?v= query, so a deploy would otherwise stay shadowed by

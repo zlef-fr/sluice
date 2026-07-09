@@ -7,6 +7,7 @@ import { getDashboard, dashboardForHost } from '../dashboards.js';
 import { feedPayload, feedMeta } from '../service.js';
 import { runQuery, parseQuery } from '../explore.js';
 import { renderDashboard } from '../views/dashboard.js';
+import { getBundle } from '../dashboard-bundle.js';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ async function serve(config, req, res) {
     config, locale, meta, initial,
     requestPath: req.originalUrl.split('?')[0],
     siteBase,
+    assetVersion: getBundle().version,
   });
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.set('Cache-Control', 'no-cache');
