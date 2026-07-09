@@ -181,7 +181,7 @@ async function openRecord(id) {
   els.modalCard.innerHTML = detailModal(rec, config, meta, locale);
   const mini = els.modalCard.querySelector('[data-role="minimap"]');
   if (mini && config.map) {
-    const s = createScatter(mini, { ramp, onPick: null });
+    const s = createScatter(mini, { ramp, onPick: null, interactive: false });
     const d = await loadPoints();
     if (d) { s.setData(d); s.setHighlight(id); }
   }
@@ -223,6 +223,9 @@ els.root.addEventListener('click', (e) => {
     case 'barfilter': state.view = 'table'; toggleEq(field, value); apply(); break;
     case 'prev': goPage(-1); break;
     case 'next': goPage(1); break;
+    case 'zoomin': if (scatter) scatter.zoomBy(1.5); break;
+    case 'zoomout': if (scatter) scatter.zoomBy(1 / 1.5); break;
+    case 'zoomreset': if (scatter) scatter.reset(); break;
     case 'row': openRecord(t.dataset.id); break;
     case 'closemodal': closeModal(); break;
   }

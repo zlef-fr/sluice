@@ -134,7 +134,12 @@ table.sl-table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 
 /* ── map ─────────────────────────────────────────────────────────────────── */
 .sl-mapwrap { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-.sl-mapwrap canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+.sl-mapwrap canvas { display: block; width: 100%; height: auto; }
+.sl-mapctrl { position: absolute; top: .7rem; right: .7rem; display: flex; flex-direction: column; gap: .3rem; }
+.sl-mapctrl button { width: 2.1rem; height: 2.1rem; border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink); border-radius: 10px; font-size: 1.15rem; line-height: 1; font-weight: 700; backdrop-filter: blur(4px); transition: transform .12s, box-shadow .12s, background .12s; display: grid; place-items: center; }
+.sl-mapctrl button:hover { transform: translateY(-1px); box-shadow: var(--shadow); background: var(--surface); }
+.sl-mapctrl button:active { transform: translateY(0); }
+.sl-maphint { position: absolute; top: .8rem; left: .8rem; font-size: .76rem; color: var(--ink-mute); background: color-mix(in srgb, var(--surface) 82%, transparent); border: 1px solid var(--border); border-radius: 999px; padding: .2rem .6rem; backdrop-filter: blur(4px); pointer-events: none; }
 .sl-maplegend { position: absolute; right: .8rem; bottom: .8rem; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--border); border-radius: 10px; padding: .5rem .7rem; font-size: .78rem; backdrop-filter: blur(4px); }
 .sl-maplegend .sl-legend-bar { height: 8px; width: 130px; border-radius: 999px; margin: .3rem 0; }
 .sl-maplegend .sl-legend-ends { display: flex; justify-content: space-between; color: var(--ink-mute); }

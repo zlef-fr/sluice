@@ -240,8 +240,15 @@ function histCard(ch, st, config, locale) {
 export function mapView(config, locale) {
   const u = ui(locale);
   const cl = pick(config.map?.colorLabel, locale) || '';
+  const zoom = locale === 'fr' ? 'Zoom' : 'Zoom';
   return `<div class="sl-mapwrap">
     <canvas data-role="scatter"></canvas>
+    <div class="sl-mapctrl" role="group" aria-label="${esc(zoom)}">
+      <button type="button" data-role="zoomin" aria-label="${locale === 'fr' ? 'Zoomer' : 'Zoom in'}">+</button>
+      <button type="button" data-role="zoomout" aria-label="${locale === 'fr' ? 'Dézoomer' : 'Zoom out'}">−</button>
+      <button type="button" data-role="zoomreset" aria-label="${locale === 'fr' ? 'Réinitialiser' : 'Reset'}">⟳</button>
+    </div>
+    <div class="sl-maphint">${locale === 'fr' ? 'Molette pour zoomer · glisser pour déplacer' : 'Scroll to zoom · drag to pan'}</div>
     ${config.map?.colorBy ? `<div class="sl-maplegend" data-role="legend"><div>${esc(cl)}</div><div class="sl-legend-bar"></div><div class="sl-legend-ends"><span data-role="legmin"></span><span data-role="legmax"></span></div></div>` : ''}
   </div>`;
 }
