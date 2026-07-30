@@ -20,6 +20,18 @@ export const ARCHIVE_DIR = join(DATA_DIR, 'archive');
 // of MB and unbounded history would eat the disk.
 export const ARCHIVE_KEEP = Math.max(0, Number(process.env.SLUICE_ARCHIVE_KEEP ?? 2));
 
+// An artifact whose STORED size exceeds this keeps no history by default (latest
+// only), unless its descriptor sets `options.keep` explicitly. History is cheap
+// for a 900 KB CSV and expensive for a 300 MB zip; this makes the cheap case the
+// default without asking every descriptor to think about it.
+export const LARGE_ARTIFACT_BYTES = Number(process.env.SLUICE_LARGE_ARTIFACT_BYTES ?? 16 * 1024 * 1024);
+
+// Global default for `options.ttl` (bytes eviction). Unset = keep bytes forever.
+export const ARTIFACT_TTL = process.env.SLUICE_ARTIFACT_TTL || '';
+
+// How often the eviction sweep runs.
+export const EVICT_INTERVAL_MS = Number(process.env.SLUICE_EVICT_INTERVAL_MS ?? 30 * 60 * 1000);
+
 // Root path redirects here — Sluice has no landing page; the docs are the repo.
 export const REPO_URL = process.env.SLUICE_REPO_URL || 'https://github.com/zlef-fr/sluice';
 

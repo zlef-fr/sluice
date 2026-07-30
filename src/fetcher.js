@@ -6,21 +6,25 @@ import { rm } from 'node:fs/promises';
 import { getAdapter } from './adapters/index.js';
 import { runTransform } from './transforms/index.js';
 import { saveFeed, setStatus, getStatus, getFeed } from './store.js';
-import { saveArtifact, touchArtifact, getIndex, summarizeIndex } from './artifacts.js';
+import { saveArtifact, touchArtifact, getIndex, summarizeIndex, restoreArtifact } from './artifacts.js';
 import { nowIso } from './util.js';
 
 // in-flight guard so concurrent triggers (scheduler + manual) don't double-fetch
 const inFlight = new Map();
 
-export function refreshSource(descriptor) {
+export function refreshSource(descriptor, opts = {}) {
   const id = descriptor.id;
-  if (inFlight.has(id)) return inFlight.get(id);
-  const p = doRefresh(descriptor).finally(() => inFlight.delete(id));
+  // A forced refetch must not be answered by an in-flight normal refresh — that
+  // one may legitimately conclude "unchanged" and leave the bytes missing.
+  if (inFlight.has(id) && !opts.force) return inFlight.get(id);
+  const p = doRefresh(descriptor, opts).finally(() => {
+    if (inFlight.get(id) === p) inFlight.delete(id);
+  });
   inFlight.set(id, p);
   return p;
 }
 
-async function doRefresh(descriptor) {
+async function doRefresh(descriptor, opts = {}) {
   const started = Date.now();
   const id = descriptor.id;
   try {
@@ -33,7 +37,46 @@ async function doRefresh(descriptor) {
     const cached = await getFeed(id);
     const validators = prev.validators && cached && cached.fetchedAt ? prev.validators : null;
 
-    const out = await adapter(descriptor, { validators });
+    const out = await adapter(descriptor, { validators, force: !!opts.force });
+
+    // Evicted bytes came back and the content is unchanged: re-attach them to the
+    // version they belong to rather than minting a duplicate.
+    if (out.restored) {
+      const { version, ...staged } = out.restored;
+      const rec = await restoreArtifact(id, version, staged);
+      const idx = await getIndex(id);
+      const summary = summarizeIndex(id, idx);
+      await saveFeed(
+        id,
+        {
+          id,
+          fetchedAt: rec?.fetchedAt || nowIso(),
+          itemCount: summary.versions.length,
+          meta: { kind: 'artifact', latest: summary.latest, keep: summary.keep, current: rec },
+          data: summary.versions,
+        },
+        { archive: false },
+      );
+      const status = {
+        status: 'ok',
+        kind: 'artifact',
+        fetchedAt: rec?.fetchedAt || null,
+        checkedAt: nowIso(),
+        itemCount: summary.versions.length,
+        bytes: rec?.bytes ?? null,
+        storedBytes: rec?.storedBytes ?? null,
+        version,
+        sha256: rec?.sha256 || null,
+        validators: out.validators || null,
+        durationMs: Date.now() - started,
+        unchanged: true,
+        restored: true,
+        error: null,
+      };
+      await setStatus(id, status);
+      console.log(`[sluice] ${id}: re-downloaded evicted bytes of ${version} (unchanged) in ${status.durationMs}ms`);
+      return { ok: true, status, unchanged: true };
+    }
 
     // File artifacts are bytes, not records: they bypass the transform and land
     // in the versioned artifact store. The feed payload becomes the version

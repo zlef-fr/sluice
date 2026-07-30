@@ -12,6 +12,7 @@ import { reconcile } from './artifacts.js';
 import { normalizeDescriptor } from './registry.js';
 import { initTransforms } from './transforms/index.js';
 import { bootScheduler } from './scheduler.js';
+import { startEvictor } from './evictor.js';
 import { SEED_SOURCES } from './seed.js';
 import { SEED_DASHBOARDS } from './seed-dashboards.js';
 import { loadDashboards, getDashboard, putDashboard, normalizeDashboard } from './dashboards.js';
@@ -143,6 +144,7 @@ async function main() {
   app.listen(PORT, () => console.log(`[sluice] listening on :${PORT}`));
 
   await bootScheduler();
+  startEvictor();
 }
 
 main().catch((e) => {

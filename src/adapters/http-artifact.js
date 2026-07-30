@@ -84,11 +84,15 @@ export default async function httpArtifact(descriptor, ctx = {}) {
   if (!url) throw new Error('http-artifact needs a `url` or `options.resolve`');
 
   const held = await latestRecord(descriptor.id);
+  // `force` means "we need the bytes back" (they were evicted to save disk), so
+  // every not-modified shortcut is skipped — those would correctly report the
+  // content is unchanged and leave us with no file.
+  const force = !!ctx.force;
 
   // Layers 1 + 2 — only trustworthy while we still hold the bytes they describe.
   let probeKey = resolvedKey;
-  if (!probeKey) probeKey = await probeKeyFor(descriptor, url);
-  if (held && probeKey && held.probeKey === probeKey) {
+  if (!force || !probeKey) probeKey = probeKey || (await probeKeyFor(descriptor, url));
+  if (!force && held && probeKey && held.probeKey === probeKey) {
     return { notModified: true, validators: ctx.validators || held.validators || null };
   }
 
@@ -103,7 +107,7 @@ export default async function httpArtifact(descriptor, ctx = {}) {
   for (let attempt = 1; ; attempt++) {
     try {
       const got = await conditionalFetch(url, {
-        validators: held ? ctx.validators || held.validators : null,
+        validators: force ? null : held ? ctx.validators || held.validators : null,
         // Ask for the bytes exactly as published. Two reasons: (1) undici
         // transparently decompresses a gzipped response, which would make the
         // stored file and its sha256 differ from the upstream artifact; (2) some
@@ -128,8 +132,18 @@ export default async function httpArtifact(descriptor, ctx = {}) {
     }
   }
 
-  // Layer 4 — identical bytes: keep the version we already have.
+  // Layer 4 — identical bytes: keep the version we already have. If its bytes had
+  // been evicted, hand the download back so they're re-attached to that same
+  // version instead of minting a new one for identical content.
   if (held && held.sha256 === staged.sha256) {
+    if (held.evicted) {
+      return {
+        restored: { version: held.version, ...staged },
+        validators,
+        probeKey: probeKey || held.probeKey || null,
+        bytes: staged.bytes,
+      };
+    }
     return {
       notModified: true,
       validators,

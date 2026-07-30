@@ -102,10 +102,12 @@ export async function deleteSource(id) {
 }
 
 // Force a refresh and wait for it. Returns {ok, status} or null if unknown id.
-export async function refreshNow(id) {
+// `force` additionally skips every not-modified shortcut — used when the bytes of
+// an artifact were evicted and a consumer needs them back.
+export async function refreshNow(id, { force = false } = {}) {
   const d = getDescriptor(id);
   if (!d) return null;
-  const r = await refreshSource(d);
+  const r = await refreshSource(d, { force });
   return { ...r, source: summarize(d) };
 }
 

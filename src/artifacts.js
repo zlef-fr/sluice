@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { Readable } from 'node:stream';
 import { join, basename } from 'node:path';
-import { ARTIFACTS_DIR, ARCHIVE_KEEP } from './config.js';
+import { ARTIFACTS_DIR, ARCHIVE_KEEP, LARGE_ARTIFACT_BYTES } from './config.js';
 
 // Extensions whose bytes are already compressed — gzipping them again costs CPU
 // and gains nothing (a .zip typically grows).
@@ -167,9 +167,12 @@ export async function saveArtifact(id, staged, extra = {}) {
   };
 
   const idx = await getIndex(id);
-  // Newest first — the list order IS the retention order. A source can keep less
-  // than the global default (`options.keep`) when its bytes are huge.
-  const limit = Number.isFinite(extra.keep) ? Math.max(0, extra.keep) : ARCHIVE_KEEP;
+  // Newest first — the list order IS the retention order. An explicit
+  // `options.keep` wins; otherwise a big artifact keeps no history (see
+  // LARGE_ARTIFACT_BYTES) while a small one gets the standard latest + N.
+  const limit = Number.isFinite(extra.keep)
+    ? Math.max(0, extra.keep)
+    : (staged.storedBytes > LARGE_ARTIFACT_BYTES ? 0 : ARCHIVE_KEEP);
   const versions = [record, ...idx.versions.filter((v) => v.version !== version)];
   const keep = versions.slice(0, limit + 1);
   const drop = versions.slice(limit + 1);
@@ -199,6 +202,55 @@ export async function touchArtifact(id, { checkedAt, probeKey, validators } = {}
 
 export async function removeArtifacts(id) {
   await rm(dirFor(id), { recursive: true, force: true });
+}
+
+// ── byte eviction (transient artifacts) ─────────────────────────────────────
+// A build input worth hundreds of MB doesn't need to sit on disk between nightly
+// builds. With `options.ttl`, the BYTES are deleted once they're older than the
+// TTL while the version record — id, sha256, size, validators, probe key — stays.
+// So change detection keeps working, `/versions` still tells the whole history,
+// and a consumer asking for evicted bytes triggers one fresh download.
+export async function evictExpired(id, ttlMs, { now = Date.now() } = {}) {
+  if (!ttlMs) return { freed: 0, versions: [] };
+  const idx = await getIndex(id);
+  let freed = 0;
+  const hit = [];
+  for (const v of idx.versions) {
+    if (v.evicted) continue;
+    if (now - new Date(v.fetchedAt).getTime() < ttlMs) continue;
+    await rm(join(dirFor(id), v.version), { recursive: true, force: true });
+    v.evicted = true;
+    v.evictedAt = new Date(now).toISOString();
+    freed += v.storedBytes || 0;
+    hit.push(v.version);
+  }
+  if (hit.length) await atomicWrite(indexFile(id), JSON.stringify(idx, null, 2));
+  return { freed, versions: hit };
+}
+
+// Re-attach freshly downloaded bytes to an existing version whose bytes were
+// evicted — same content (sha matches), so it must NOT become a new version.
+export async function restoreArtifact(id, version, staged) {
+  const idx = await getIndex(id);
+  const rec = idx.versions.find((v) => v.version === version);
+  if (!rec) return null;
+  const dir = join(dirFor(id), version);
+  await mkdir(dir, { recursive: true });
+  await rename(staged.tmpPath, join(dir, staged.stored));
+  rec.stored = staged.stored;
+  rec.encoding = staged.encoding;
+  rec.storedBytes = staged.storedBytes;
+  delete rec.evicted;
+  delete rec.evictedAt;
+  rec.restoredAt = new Date().toISOString();
+  await atomicWrite(indexFile(id), JSON.stringify(idx, null, 2));
+  await rm(join(dirFor(id), '.staging'), { recursive: true, force: true });
+  return rec;
+}
+
+// Do we currently hold the bytes of this version?
+export function hasBytes(rec) {
+  return !!rec && !rec.evicted;
 }
 
 // Bytes on disk for one source, all versions (for the /api/sources report).
@@ -231,11 +283,14 @@ export function summarizeIndex(id, idx) {
       checkedAt: v.checkedAt || v.fetchedAt,
       filename: v.filename,
       bytes: v.bytes,
-      storedBytes: v.storedBytes,
+      storedBytes: v.evicted ? 0 : v.storedBytes,
       encoding: v.encoding,
       sha256: v.sha256,
       contentType: v.contentType,
       current: v.version === idx.latest,
+      // Bytes evicted to keep the disk small; identity kept. A request for the
+      // current version re-downloads it, an older one is upstream-only.
+      evicted: !!v.evicted,
       url: `/api/artifact/${id}/${v.version}`,
     })),
   };

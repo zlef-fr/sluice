@@ -314,10 +314,21 @@ curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T0415
 
 - **Versioned, with bounded retention.** A version is created only when the content hash
   changes. `SLUICE_ARCHIVE_KEEP` (default `2`) sets how many *superseded* versions are
-  kept on top of the current one — latest + 2. A single source can keep fewer with
-  `options.keep` (a 300 MB zip doesn't deserve the same history as a 400 KB CSV).
-  Anything older is deleted; version directories the index doesn't reference are swept
-  at boot, so a download killed mid-stream leaves nothing behind.
+  kept on top of the current one — latest + 2. History is cheap for a 900 KB CSV and
+  expensive for a 300 MB zip, so an artifact whose **stored** size exceeds
+  `SLUICE_LARGE_ARTIFACT_BYTES` (default 16 MB) keeps latest only, unless its descriptor
+  overrides with `options.keep`. Anything older is deleted; version directories the index
+  doesn't reference are swept at boot, so a download killed mid-stream leaves nothing behind.
+- **Transient bytes (`options.ttl`).** A 300 MB zip that one nightly pipeline unzips once
+  has no business occupying disk for the other 23 hours. With a TTL, the **bytes** are
+  deleted once older than it while the **version record survives** — sha256, size,
+  validators, probe key — so change detection and `/versions` keep working. A request for
+  the current version's evicted bytes re-downloads them and **re-attaches them to that same
+  version** when the content is unchanged (no duplicate version); an older evicted version
+  answers `410` with its hash rather than silently fetching something else. Best for inputs
+  that are both big and re-published upstream nightly, where keeping them buys nothing:
+  the fiche\* sites use it for 845 MB of parliamentary zips, cutting stored artifacts from
+  1120 MB to 264 MB. Sweep interval: `SLUICE_EVICT_INTERVAL_MS` (default 30 min).
 - **Record feeds get history too.** Each `saveFeed` rotates the snapshot it replaces into
   `archive/<id>/<version>.json.gz` under the same retention, readable at
   `/api/archive/:id/:version`.
@@ -332,7 +343,7 @@ curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T0415
 - **A daily refresh is cheap.** See the probe layers below.
 - **Interrupted transfers are retried** (`options.retries`, default 3, with backoff).
 
-`options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `retries`,
+`options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `ttl`, `retries`,
 `probe`, `resolve`.
 
 ## Caching & upstream politeness
@@ -380,6 +391,9 @@ was last *verified* (updated even on a 304).
 | `SLUICE_READ_TOKEN`    | *(unset → reads open)* | optional read token                  |
 | `SLUICE_USER_AGENT`    | `Sluice/1.0 …`         | UA sent to upstreams                 |
 | `SLUICE_ARCHIVE_KEEP`  | `2`                    | superseded versions kept per data set (latest + N) |
+| `SLUICE_LARGE_ARTIFACT_BYTES` | `16777216`      | above this stored size, an artifact keeps latest only |
+| `SLUICE_ARTIFACT_TTL`  | *(unset)*              | default `options.ttl` — evict artifact bytes after this age |
+| `SLUICE_EVICT_INTERVAL_MS` | `1800000`          | how often the eviction sweep runs   |
 | `SLUICE_MIN_REFRESH_MS`| `300000`               | global refresh floor (protect upstreams) |
 
 ## License

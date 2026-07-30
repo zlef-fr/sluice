@@ -5,7 +5,8 @@ import { Router } from 'express';
 import { requireRead } from '../auth.js';
 import { hasSource } from '../store.js';
 import { listFeedArchives, readFeedArchive } from '../store.js';
-import { getIndex, resolveVersion, readArtifact, summarizeIndex, isVersionId } from '../artifacts.js';
+import { getIndex, resolveVersion, readArtifact, summarizeIndex, isVersionId, hasBytes } from '../artifacts.js';
+import { refreshNow } from '../service.js';
 
 const artifactRouter = Router();
 
@@ -16,11 +17,30 @@ async function sendArtifact(req, res, id, wanted) {
   if (wanted && wanted !== 'latest' && !isVersionId(wanted)) {
     return res.status(400).json({ error: 'malformed version (expected e.g. 20260730T041500Z)' });
   }
-  const rec = await resolveVersion(id, wanted);
+  let rec = await resolveVersion(id, wanted);
   if (!rec) {
     return res.status(wanted && wanted !== 'latest' ? 404 : 503).json({
       error: wanted && wanted !== 'latest' ? 'unknown version' : 'artifact not fetched yet, retry shortly',
     });
+  }
+
+  // Bytes evicted to keep the disk small (options.ttl). For the current version we
+  // fetch them again now — the caller is a build pipeline, it can wait — and the
+  // download re-attaches to this same version if the content is still identical.
+  if (!hasBytes(rec)) {
+    const isCurrent = rec.version === (await getIndex(id)).latest;
+    if (!isCurrent) {
+      return res.status(410).json({
+        error: 'this version\'s bytes were evicted to save disk; only its metadata is kept',
+        version: rec.version,
+        sha256: rec.sha256,
+      });
+    }
+    await refreshNow(id, { force: true });
+    rec = await resolveVersion(id, 'latest');
+    if (!rec || !hasBytes(rec)) {
+      return res.status(502).json({ error: 'could not re-download the evicted artifact from upstream' });
+    }
   }
 
   // ?raw=1 hands back exactly what is on disk (gzipped if stored gzipped), for a
