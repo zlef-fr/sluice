@@ -2,9 +2,11 @@
 // (normalize) → store (persist feed + status). Never throws to the caller;
 // records the error in status instead, so one broken upstream can't take down
 // the scheduler or the API.
+import { rm } from 'node:fs/promises';
 import { getAdapter } from './adapters/index.js';
 import { runTransform } from './transforms/index.js';
 import { saveFeed, setStatus, getStatus, getFeed } from './store.js';
+import { saveArtifact, touchArtifact, getIndex, summarizeIndex } from './artifacts.js';
 import { nowIso } from './util.js';
 
 // in-flight guard so concurrent triggers (scheduler + manual) don't double-fetch
@@ -33,8 +35,88 @@ async function doRefresh(descriptor) {
 
     const out = await adapter(descriptor, { validators });
 
+    // File artifacts are bytes, not records: they bypass the transform and land
+    // in the versioned artifact store. The feed payload becomes the version
+    // index, so /api/feed/:id still describes the source.
+    if (out.artifact) {
+      const fetchedAt = nowIso();
+      const { record, index, pruned } = await saveArtifact(id, out.artifact, {
+        fetchedAt,
+        keep: out.artifact.keep,
+        contentType: out.artifact.contentType,
+        url: out.artifact.url,
+        probeKey: out.artifact.probeKey,
+        validators: out.artifact.validators,
+      });
+      const summary = summarizeIndex(id, index);
+      await saveFeed(
+        id,
+        {
+          id,
+          fetchedAt,
+          itemCount: summary.versions.length,
+          meta: { kind: 'artifact', latest: summary.latest, keep: summary.keep, current: record },
+          data: summary.versions,
+        },
+        { archive: false }, // the artifact store does its own versioning
+      );
+      const status = {
+        status: 'ok',
+        kind: 'artifact',
+        fetchedAt,
+        checkedAt: fetchedAt,
+        itemCount: summary.versions.length,
+        bytes: record.bytes,
+        storedBytes: record.storedBytes,
+        version: record.version,
+        sha256: record.sha256,
+        validators: out.validators || null,
+        durationMs: Date.now() - started,
+        unchanged: false,
+        error: null,
+      };
+      await setStatus(id, status);
+      console.log(
+        `[sluice] ${id}: new artifact ${record.version} — ${fmtBytes(record.bytes)}` +
+          `${record.encoding === 'gzip' ? ` (${fmtBytes(record.storedBytes)} stored)` : ''}` +
+          ` in ${status.durationMs}ms${pruned.length ? `; pruned ${pruned.join(', ')}` : ''}`,
+      );
+      return { ok: true, status };
+    }
+
     // Upstream unchanged → keep the cached feed, skip transform + re-download.
     if (out.notModified) {
+      // An artifact adapter may have had to download to find out (no validators
+      // upstream) — throw the identical copy away and just re-stamp the version.
+      if (out.discard) await rm(out.discard, { force: true }).catch(() => {});
+      const artifactIdx = await getIndex(id);
+      if (artifactIdx.latest) {
+        const cur = await touchArtifact(id, {
+          checkedAt: nowIso(),
+          probeKey: out.probeKey,
+          validators: out.validators,
+        });
+        const status = {
+          status: 'ok',
+          kind: 'artifact',
+          fetchedAt: cur?.fetchedAt || null,
+          checkedAt: cur?.checkedAt || nowIso(),
+          itemCount: artifactIdx.versions.length,
+          bytes: cur?.bytes ?? null,
+          storedBytes: cur?.storedBytes ?? null,
+          version: artifactIdx.latest,
+          sha256: cur?.sha256 || null,
+          validators: out.validators || prev.validators || null,
+          durationMs: Date.now() - started,
+          unchanged: true,
+          error: null,
+        };
+        await setStatus(id, status);
+        console.log(
+          `[sluice] ${id}: unchanged — kept artifact ${artifactIdx.latest} in ${status.durationMs}ms`,
+        );
+        return { ok: true, status, unchanged: true };
+      }
       const status = {
         status: 'ok',
         fetchedAt: cached.fetchedAt,
@@ -93,6 +175,13 @@ async function doRefresh(descriptor) {
     console.error(`[sluice] ${id}: FAILED — ${status.error}`);
     return { ok: false, status };
   }
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 
 // Preserve the last successful fetchedAt on error, if any.

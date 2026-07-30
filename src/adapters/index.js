@@ -4,6 +4,7 @@
 import httpJson from './http-json.js';
 import httpCsv from './http-csv.js';
 import httpZipXml from './http-zip-xml.js';
+import httpArtifact from './http-artifact.js';
 import odsExport from './ods-export.js';
 import dvfGeo from './dvf-geo.js';
 import melodiIpc from './melodi-ipc.js';
@@ -13,6 +14,7 @@ const ADAPTERS = {
   'http-json': httpJson,
   'http-csv': httpCsv,
   'http-zip-xml': httpZipXml,
+  'http-artifact': httpArtifact,
   'ods-export': odsExport,
   'dvf-geo': dvfGeo,
   'melodi-ipc': melodiIpc,

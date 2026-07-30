@@ -7,6 +7,8 @@ import {
   listSources, getSource, registerSource, refreshNow, feedPayload, feedMeta,
 } from './service.js';
 import { WRITE_TOKEN } from './config.js';
+import { getIndex, summarizeIndex } from './artifacts.js';
+import { listFeedArchives } from './store.js';
 
 export const PROTOCOL_VERSION = '2024-11-05';
 export const SERVER_INFO = { name: 'sluice', version: '1.0.0' };
@@ -70,6 +72,26 @@ const TOOLS = [
     handler: async ({ id }) => {
       const m = await feedMeta(id);
       return m ? ok(m) : fail(`unknown source "${id}" or not fetched yet`);
+    },
+  },
+  {
+    name: 'list_versions',
+    description:
+      'List the stored versions of a data set. For a file source (adapter http-artifact) '
+      + 'these are the kept artifact versions with sha256/size — download one with '
+      + 'GET /api/artifact/<id>/<version>. For a record source these are the superseded '
+      + 'snapshots, readable at GET /api/archive/<id>/<version>.',
+    inputSchema: {
+      type: 'object', properties: { id: { type: 'string' } }, required: ['id'],
+    },
+    handler: async ({ id }) => {
+      const src = getSource(id);
+      if (!src) return fail(`unknown source "${id}"`);
+      if (src.kind === 'artifact') {
+        const idx = await getIndex(id);
+        return ok(summarizeIndex(id, idx));
+      }
+      return ok({ id, kind: 'records', current: src.status.fetchedAt, archives: await listFeedArchives(id) });
     },
   },
   {

@@ -33,9 +33,10 @@ export function normalizeDescriptor(input, { owner } = {}) {
     return err('`transform` must be a name (string) or an inline mapping object');
   }
 
-  // The adapter needs *either* a url or an inline `source` object (ods-export).
-  if (!input.url && !input.source) {
-    return err('a `url` (or an adapter-specific `source` object) is required');
+  // The adapter needs *either* a url, an inline `source` object (ods-export), or
+  // a resolver that derives the URL at fetch time (http-artifact + a release tag).
+  if (!input.url && !input.source && !input.options?.resolve) {
+    return err('a `url` (or an adapter-specific `source` object, or `options.resolve`) is required');
   }
 
   const refreshMs = parseDuration(input.refresh) ?? DEFAULT_REFRESH_MS;

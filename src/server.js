@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { PORT, REPO_URL } from './config.js';
-import { loadRegistry, warmFeeds, getDescriptor, putDescriptor } from './store.js';
+import { loadRegistry, warmFeeds, getDescriptor, putDescriptor, allDescriptors } from './store.js';
+import { reconcile } from './artifacts.js';
 import { normalizeDescriptor } from './registry.js';
 import { initTransforms } from './transforms/index.js';
 import { bootScheduler } from './scheduler.js';
@@ -18,6 +19,7 @@ import { listSources } from './service.js';
 
 import sourcesRouter from './routes/sources.js';
 import feedRouter from './routes/feed.js';
+import { artifactRouter, archiveRouter } from './routes/artifact.js';
 import exploreRouter from './routes/explore.js';
 import dashboardsRouter from './routes/dashboards.js';
 import dashboardRouter from './routes/dashboard.js';
@@ -54,6 +56,17 @@ async function seedDashboards() {
   }
 }
 
+// Drop artifact version directories the index doesn't reference — a download
+// killed mid-stream (restart, OOM) would otherwise leave bytes nothing points at.
+async function reconcileArtifacts() {
+  let removed = 0;
+  for (const d of allDescriptors()) {
+    if (d.adapter !== 'http-artifact') continue;
+    removed += await reconcile(d.id);
+  }
+  if (removed) console.log(`[sluice] reconciled ${removed} orphaned artifact dir(s)`);
+}
+
 async function main() {
   await loadRegistry();
   await seed();
@@ -61,10 +74,13 @@ async function main() {
   await seedDashboards();
   await warmFeeds();
   await initTransforms();
+  await reconcileArtifacts();
 
   const app = express();
   app.disable('x-powered-by');
-  app.use(compression());
+  // Artifact bodies are raw upstream files — often already-compressed zips/gz,
+  // and always streamed with a known length. Don't run them through gzip.
+  app.use(compression({ filter: (req, res) => !req.path.startsWith('/api/artifact/') && compression.filter(req, res) }));
   app.use(express.json({ limit: '1mb' }));
 
   // CORS: feeds are open data meant to be pulled cross-origin by other apps.
@@ -88,6 +104,8 @@ async function main() {
 
   app.use('/api/sources', sourcesRouter);
   app.use('/api/feed', feedRouter);
+  app.use('/api/artifact', artifactRouter);
+  app.use('/api/archive', archiveRouter);
   app.use('/api/explore', exploreRouter);
   app.use('/api/dashboards', dashboardsRouter);
   app.use('/mcp', mcpRouter);

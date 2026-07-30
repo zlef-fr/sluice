@@ -12,8 +12,12 @@ import { toGeoJson } from './geojson.js';
 // A compact, wire-safe view of a source (descriptor sans internals + status).
 export function summarize(descriptor) {
   const st = getStatus(descriptor.id);
+  // A file source ("artifact") is consumed as bytes from /api/artifact; a record
+  // source is consumed as JSON from /api/feed. Both keep version history.
+  const isArtifact = descriptor.adapter === 'http-artifact';
   return {
     id: descriptor.id,
+    kind: isArtifact ? 'artifact' : 'records',
     name: descriptor.name,
     description: descriptor.description,
     adapter: descriptor.adapter,
@@ -27,15 +31,25 @@ export function summarize(descriptor) {
     owner: descriptor.owner,
     createdAt: descriptor.createdAt,
     feedUrl: `/api/feed/${descriptor.id}`,
+    artifactUrl: isArtifact ? `/api/artifact/${descriptor.id}` : null,
+    versionsUrl: isArtifact
+      ? `/api/artifact/${descriptor.id}/versions`
+      : `/api/archive/${descriptor.id}/versions`,
     status: st
       ? {
           state: st.status,
           fetchedAt: st.fetchedAt || null,
           checkedAt: st.checkedAt || st.fetchedAt || null,
           itemCount: st.itemCount ?? null,
+          version: st.version || null,
+          bytes: st.bytes ?? null,
+          unchanged: st.unchanged ?? null,
           error: st.error || null,
         }
-      : { state: 'pending', fetchedAt: null, checkedAt: null, itemCount: null, error: null },
+      : {
+          state: 'pending', fetchedAt: null, checkedAt: null, itemCount: null,
+          version: null, bytes: null, unchanged: null, error: null,
+        },
   };
 }
 
