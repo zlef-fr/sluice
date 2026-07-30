@@ -5,12 +5,17 @@ import { Router } from 'express';
 import { requireRead } from '../auth.js';
 import { hasSource } from '../store.js';
 import { listFeedArchives, readFeedArchive } from '../store.js';
-import { getIndex, resolveVersion, readArtifact, summarizeIndex } from '../artifacts.js';
+import { getIndex, resolveVersion, readArtifact, summarizeIndex, isVersionId } from '../artifacts.js';
 
 const artifactRouter = Router();
 
 async function sendArtifact(req, res, id, wanted) {
   if (!hasSource(id)) return res.status(404).json({ error: 'unknown source' });
+  // resolveVersion only ever returns records from our own index, but reject a
+  // malformed version here too so nothing downstream sees a path-ish string.
+  if (wanted && wanted !== 'latest' && !isVersionId(wanted)) {
+    return res.status(400).json({ error: 'malformed version (expected e.g. 20260730T041500Z)' });
+  }
   const rec = await resolveVersion(id, wanted);
   if (!rec) {
     return res.status(wanted && wanted !== 'latest' ? 404 : 503).json({
@@ -75,7 +80,11 @@ archiveRouter.get('/:id/versions', requireRead, async (req, res) => {
 archiveRouter.get('/:id/:version', requireRead, async (req, res) => {
   const { id, version } = req.params;
   if (!hasSource(id)) return res.status(404).json({ error: 'unknown source' });
-  const stream = await readFeedArchive(id, version.replace(/\.json$/, ''));
+  const wanted = version.replace(/\.json$/, '');
+  if (!isVersionId(wanted)) {
+    return res.status(400).json({ error: 'malformed version (expected e.g. 20260730T041500Z)' });
+  }
+  const stream = await readFeedArchive(id, wanted);
   if (!stream) return res.status(404).json({ error: 'unknown archive version' });
   res.set('Content-Type', 'application/json; charset=utf-8');
   res.set('Cache-Control', 'public, max-age=31536000, immutable');

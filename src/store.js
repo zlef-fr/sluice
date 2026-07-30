@@ -9,7 +9,7 @@ import { createGzip, createGunzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { join } from 'node:path';
 import { DATA_DIR, SOURCES_FILE, FEEDS_DIR, ARCHIVE_DIR, ARCHIVE_KEEP } from './config.js';
-import { versionId, removeArtifacts } from './artifacts.js';
+import { versionId, isVersionId, removeArtifacts } from './artifacts.js';
 
 // id → descriptor
 const sources = new Map();
@@ -168,7 +168,11 @@ export async function listFeedArchives(id) {
 }
 
 // Readable stream of an archived snapshot's JSON (gunzipped), or null.
+// `version` reaches this from a URL path segment, so it is checked against the
+// exact shape versionId() produces — otherwise a `../` would walk out of the
+// archive directory. `id` is already constrained (registered kebab-case source).
 export async function readFeedArchive(id, version) {
+  if (!isVersionId(version)) return null;
   const file = join(ARCHIVE_DIR, id, `${version}.json.gz`);
   try {
     await stat(file);

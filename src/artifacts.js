@@ -41,6 +41,12 @@ export function versionId(iso = new Date().toISOString()) {
   return iso.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 }
 
+// Exactly what versionId() emits. Version ids arrive as URL path segments and are
+// used to build file paths, so anything else must be rejected rather than joined.
+export function isVersionId(v) {
+  return typeof v === 'string' && /^\d{8}T\d{6}Z$/.test(v);
+}
+
 function dirFor(id) {
   return join(ARTIFACTS_DIR, id);
 }
