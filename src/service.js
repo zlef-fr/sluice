@@ -62,14 +62,35 @@ export function getSource(id) {
   return d ? summarize(d) : null;
 }
 
+// True when re-registering would change nothing about how the source is fetched.
+// (createdAt/owner are bookkeeping, not fetch inputs.)
+function sameFetchContract(a, b) {
+  if (!a || !b) return false;
+  const strip = ({ createdAt, owner, ...rest }) => JSON.stringify(rest);
+  return strip(a) === strip(b);
+}
+
 // Register or update a source. Returns {ok, source} or {ok:false, error}.
 export async function registerSource(input, { owner } = {}) {
   const norm = normalizeDescriptor(input, { owner });
   if (!norm.ok) return norm;
+  const existing = getDescriptor(norm.descriptor.id);
+  const st = getStatus(norm.descriptor.id);
+  // Re-registering an identical descriptor is a no-op, not a reason to poke the
+  // upstream: consumers call register-then-pull on every build, so triggering a
+  // fetch here would probe every source on every pipeline run. Only fetch when
+  // something about the contract changed, or the current data is older than its
+  // own interval.
+  const fresh =
+    st?.status === 'ok' &&
+    st.checkedAt &&
+    Date.now() - new Date(st.checkedAt).getTime() < norm.descriptor.refreshMs;
+  const skipFetch = sameFetchContract(existing, norm.descriptor) && fresh;
+
   await putDescriptor(norm.descriptor);
   scheduleSource(norm.descriptor);
   // Kick off the first fetch in the background; caller doesn't wait on upstream.
-  refreshSource(norm.descriptor);
+  if (!skipFetch) refreshSource(norm.descriptor);
   return { ok: true, source: summarize(norm.descriptor) };
 }
 
