@@ -9,6 +9,16 @@ export const ROOT = join(__dirname, '..');
 export const DATA_DIR = process.env.SLUICE_DATA_DIR || join(ROOT, 'data');
 export const SOURCES_FILE = join(DATA_DIR, 'sources.json');
 export const FEEDS_DIR = join(DATA_DIR, 'feeds');
+// Raw file artifacts (zips, bulk CSV exports) live outside feeds/ — they are
+// bytes, not records, and are kept per version.
+export const ARTIFACTS_DIR = join(DATA_DIR, 'artifacts');
+// Superseded record-feed snapshots, gzipped, one file per version.
+export const ARCHIVE_DIR = join(DATA_DIR, 'archive');
+
+// How many SUPERSEDED versions to keep per data set, on top of the current one.
+// 2 → latest + 2 archives. Bounded on purpose: raw open-data bulks are hundreds
+// of MB and unbounded history would eat the disk.
+export const ARCHIVE_KEEP = Math.max(0, Number(process.env.SLUICE_ARCHIVE_KEEP ?? 2));
 
 // Root path redirects here — Sluice has no landing page; the docs are the repo.
 export const REPO_URL = process.env.SLUICE_REPO_URL || 'https://github.com/zlef-fr/sluice';

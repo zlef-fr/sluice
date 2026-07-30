@@ -125,6 +125,7 @@ A **source descriptor** is the contract you register:
 | `dvf-geo`       | streams the French DVF `full.csv.gz` per year and aggregates inline (a heavy raw source must aggregate in the adapter, not hand millions of rows to a transform) |
 | `melodi-ipc`    | INSEE *melodi* SDMX API — assembles a multi-query index (all-items + COICOP sub-indices + weights) into one flat feed, with polite `429`/`503` backoff |
 | `sncf-lost`     | SNCF lost-property ODS dataset, aggregated inline (avoids the 1.5M-row raw table) |
+| `http-artifact` | keeps the **file itself**, versioned, instead of parsing records — for build inputs (zip dumps, hundred-MB bulk exports). See [File artifacts](#file-artifacts). |
 
 Adapters live in `src/adapters/` and return raw records; drop a new file in that
 folder and register it in `src/adapters/index.js` to add your own. The
@@ -205,6 +206,11 @@ depends on them being present.
 | GET    | `/api/feed/:id`               | read   | full feed `{fetchedAt,meta,data}`|
 | GET    | `/api/feed/:id/meta`          | read   | metadata only                    |
 | GET    | `/api/feed/:id.geojson`       | read   | GeoJSON projection               |
+| GET    | `/api/artifact/:id`           | read   | current file bytes (file sources) |
+| GET    | `/api/artifact/:id/:version`  | read   | a specific version's bytes       |
+| GET    | `/api/artifact/:id/versions`  | read   | version index (sha256, sizes)    |
+| GET    | `/api/archive/:id/versions`   | read   | superseded record-feed snapshots |
+| GET    | `/api/archive/:id/:version`   | read   | one superseded snapshot (JSON)   |
 | GET    | `/api/explore/:id`            | read   | filter/sort/page/facet/search    |
 | GET    | `/api/explore/:id/record/:rid`| read   | one record by id field           |
 | GET    | `/api/explore/:id/points`     | read   | compact geo points for a map     |
@@ -280,6 +286,55 @@ declare `"hosts":["data.myapp.example"]`; point that hostname's edge at Sluice a
 `/api/dashboards/by-host/:host` resolves it, so the dashboard lives on the app's own domain.
 See `src/seed-dashboards.js` for a complete reference config (`essence-fuel`).
 
+## File artifacts
+
+Some upstreams aren't record streams to normalize — they're **build inputs**: a zip
+dump, a 700 MB bulk CSV export. A pipeline wants that file, byte for byte, and wants
+yesterday's copy still around when today's upstream publishes something broken.
+
+Register those with the `http-artifact` adapter. Sluice stores the **bytes**, versioned,
+and serves them back from `/api/artifact/:id`:
+
+```bash
+curl -X POST http://localhost:10099/api/sources \
+  -H "x-sluice-token: $SLUICE_TOKEN" -H 'content-type: application/json' \
+  -d '{
+    "id": "fr-an-scrutins",
+    "name": "Assemblée nationale — scrutins publics",
+    "adapter": "http-artifact",
+    "url": "https://data.assemblee-nationale.fr/static/openData/repository/17/loi/scrutins/Scrutins.json.zip",
+    "options": { "filename": "Scrutins.json.zip", "probe": { "type": "http-head" } },
+    "refresh": "24h"
+  }'
+
+curl -o scrutins.zip http://localhost:10099/api/artifact/fr-an-scrutins   # current bytes
+curl http://localhost:10099/api/artifact/fr-an-scrutins/versions          # what's kept
+curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T041500Z
+```
+
+- **Versioned, with bounded retention.** A version is created only when the content hash
+  changes. `SLUICE_ARCHIVE_KEEP` (default `2`) sets how many *superseded* versions are
+  kept on top of the current one — latest + 2. A single source can keep fewer with
+  `options.keep` (a 300 MB zip doesn't deserve the same history as a 400 KB CSV).
+  Anything older is deleted; version directories the index doesn't reference are swept
+  at boot, so a download killed mid-stream leaves nothing behind.
+- **Record feeds get history too.** Each `saveFeed` rotates the snapshot it replaces into
+  `archive/<id>/<version>.json.gz` under the same retention, readable at
+  `/api/archive/:id/:version`.
+- **Stored compressed when that helps.** Text is gzipped on disk (a 686 MB CSV export
+  lands at ~60 MB); already-compressed types (`.zip`, `.gz`, images) are stored as-is.
+  Reads decompress transparently, so `curl -o file` gets the original bytes — `?raw=1`
+  hands back the stored form for a byte-for-byte mirror.
+- **Byte-identical to upstream.** Downloads request `Accept-Encoding: identity`: transparent
+  decompression would make the stored file and its sha256 differ from the published
+  artifact. (It also keeps some hosts from dropping large transfers — the AN closes the
+  connection seconds into its 296 MB amendements zip when a content-encoding is negotiated.)
+- **A daily refresh is cheap.** See the probe layers below.
+- **Interrupted transfers are retried** (`options.retries`, default 3, with backoff).
+
+`options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `retries`,
+`probe`, `resolve`.
+
 ## Caching & upstream politeness
 
 Sluice is built to hit upstream providers as little as possible:
@@ -298,6 +353,16 @@ Sluice is built to hit upstream providers as little as possible:
   `If-None-Match`/`If-Modified-Since` on the next refresh. If the upstream answers **304 Not
   Modified**, the cached feed is kept with no re-download and no re-parse. (Upstreams that
   don't emit validators simply fall back to a full fetch.)
+- **Cheap change probes (file artifacts).** A daily refresh of a 700 MB export must not mean
+  a daily 700 MB download, so `http-artifact` checks in cost order and stops at the first
+  answer: (1) `options.resolve` — a URL that carries its own version (a GitHub release tag)
+  means an unchanged tag is unchanged content, nothing is fetched; (2) `options.probe` — one
+  small request whose answer moves when the data does (`ods-dataset` reads the OpenDataSoft
+  catalogue's `data_processed` + `records_count`, since its `/exports/csv` streams emit no
+  validators; `http-head` uses `ETag`/`Last-Modified`, and deliberately **ignores
+  `Content-Length` alone** — an edited file of the same size would read as unchanged);
+  (3) conditional GET; (4) sha256 of the downloaded bytes, so even a validator-less upstream
+  that re-serves identical content doesn't rotate a version.
 - **Client revalidation.** Feed/meta/geojson responses carry `Cache-Control` max-age plus an
   **ETag**; a consumer revalidating an unchanged feed gets an empty `304`. The SDK's
   `watch()` polls the tiny `/meta` and only pulls the full feed when the snapshot changes.
@@ -314,6 +379,7 @@ was last *verified* (updated even on a 304).
 | `SLUICE_TOKEN`         | *(unset → writes off)* | write token                          |
 | `SLUICE_READ_TOKEN`    | *(unset → reads open)* | optional read token                  |
 | `SLUICE_USER_AGENT`    | `Sluice/1.0 …`         | UA sent to upstreams                 |
+| `SLUICE_ARCHIVE_KEEP`  | `2`                    | superseded versions kept per data set (latest + N) |
 | `SLUICE_MIN_REFRESH_MS`| `300000`               | global refresh floor (protect upstreams) |
 
 ## License
