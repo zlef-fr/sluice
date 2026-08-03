@@ -12,6 +12,12 @@ export async function conditionalFetch(url, { headers = {}, validators = null } 
   const res = await fetch(url, { headers: h });
   if (res.status === 304) return { res, notModified: true, validators };
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  // 2xx is not enough: bot-protected origins answer an unwelcome client with a
+  // bodyless 202/204 (europarl.europa.eu does, for any UA it doesn't recognise).
+  // That used to be stored as a perfectly healthy 0-byte artifact.
+  if (res.status !== 200 && res.status !== 206) {
+    throw new Error(`HTTP ${res.status} from ${url} — no payload (upstream accepted but did not answer)`);
+  }
 
   const etag = res.headers.get('etag');
   const lastModified = res.headers.get('last-modified');
