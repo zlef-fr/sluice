@@ -17,6 +17,7 @@
 //   compress   'auto' (default) | true | false — gzip on disk unless already compressed
 //   resolve    { type:'github-latest-release', repo:'owner/name', asset:'x.csv.gz' }
 //   probe      { type:'ods-dataset', url } | { type:'http-head', url? }
+//   headers    extra request headers, e.g. a User-Agent an origin's bot filter accepts
 import { USER_AGENT } from '../config.js';
 import { conditionalFetch } from './http.js';
 import { latestRecord, streamToStaging } from '../artifacts.js';
@@ -46,6 +47,13 @@ async function resolveUrl(descriptor) {
   throw new Error(`unknown resolve.type "${r.type}"`);
 }
 
+// Per-source request headers, merged over the defaults. A source only needs this
+// when the origin filters on them — the EP's list answers Sluice's own UA with an
+// empty 202 and only serves a browser-shaped one.
+function extraHeaders(descriptor) {
+  return descriptor.options?.headers || {};
+}
+
 // ── layer 2: cheap change probe ─────────────────────────────────────────────
 async function probeKeyFor(descriptor, url) {
   const p = descriptor.options?.probe;
@@ -63,7 +71,10 @@ async function probeKeyFor(descriptor, url) {
   }
 
   if (p.type === 'http-head') {
-    const res = await fetch(p.url || url, { method: 'HEAD', headers: { 'User-Agent': USER_AGENT } });
+    const res = await fetch(p.url || url, {
+      method: 'HEAD',
+      headers: { 'User-Agent': USER_AGENT, ...extraHeaders(descriptor) },
+    });
     if (!res.ok) return null;
     const etag = res.headers.get('etag');
     const lastModified = res.headers.get('last-modified');
@@ -114,7 +125,7 @@ export default async function httpArtifact(descriptor, ctx = {}) {
         // open-data hosts kill large transfers when a content-encoding is
         // negotiated — data.assemblee-nationale.fr closes the connection a few
         // seconds into the 296 MB amendements zip unless this is set.
-        headers: { 'Accept-Encoding': 'identity' },
+        headers: { 'Accept-Encoding': 'identity', ...extraHeaders(descriptor) },
       });
       validators = got.validators;
       if (got.notModified && held) return { notModified: true, validators };
