@@ -11,7 +11,9 @@ normalized feed**. Sluice does the fetching, parsing, enrichment, scheduling and
 - 🚰 **Feed endpoints** — pull the current cached, normalized data (`GET /api/feed/:id`),
   its metadata (`/meta`), or a **GeoJSON** projection (`/:id.geojson`) for maps.
 - ⏱ **Scheduled refresh** — per-source interval, staggered, restart-aware (won't re-hammer
-  upstreams), one broken source never breaks the others.
+  upstreams), one broken source never breaks the others. `refresh: "never"` marks a
+  **frozen** data set (a closed budget year, a finished election, an archived snapshot):
+  fetched once, never scheduled, never reported stale — still refreshable by hand.
 - 📜 **Run history** — every refresh is recorded (outcome, duration, item count, whether the
   data actually changed, what triggered it), per source and as one fleet timeline, so an
   intermittent failure or a feed that quietly stopped changing is visible.
@@ -402,6 +404,11 @@ was last *verified* (updated even on a 304).
 | `SLUICE_EVICT_INTERVAL_MS` | `1800000`          | how often the eviction sweep runs   |
 | `SLUICE_MIN_REFRESH_MS`| `300000`               | global refresh floor (protect upstreams) |
 | `SLUICE_RUN_KEEP`      | `40`                   | refresh runs kept per source (history)   |
+
+A descriptor's `refresh` accepts a duration (`"6h"`, `"30d"`) or **`"never"`** — the
+latter means the data set is closed: no timer is armed, re-registering it does not
+re-download it, and it is never counted as stale. Use it for anything that cannot
+change again; use a duration for anything a publisher may still re-issue.
 
 ## License
 

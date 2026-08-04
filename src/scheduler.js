@@ -35,6 +35,9 @@ function arm(descriptor, dueAt) {
 
 export function scheduleSource(descriptor) {
   unschedule(descriptor.id);
+  // A frozen data set (refresh: "never") gets no timer at all — a closed budget
+  // year does not need to be asked about every month.
+  if (descriptor.frozen || !descriptor.refreshMs) return;
   const due = Date.now() + descriptor.refreshMs;
   nextAt.set(descriptor.id, due);
   arm(descriptor, due);
@@ -53,11 +56,13 @@ export function nextRunAt(id) {
   return at ? new Date(at).toISOString() : null;
 }
 
-// Decide whether a source needs an immediate refresh at boot.
+// Decide whether a source needs an immediate refresh at boot. A frozen one is
+// due only while we have never successfully fetched it — after that, never.
 async function isStale(descriptor) {
   const st = getStatus(descriptor.id);
   const feed = await getFeed(descriptor.id);
   if (!feed || !st || st.status !== 'ok' || !st.fetchedAt) return true;
+  if (descriptor.frozen || !descriptor.refreshMs) return false;
   const age = Date.now() - new Date(st.fetchedAt).getTime();
   return age > descriptor.refreshMs;
 }
