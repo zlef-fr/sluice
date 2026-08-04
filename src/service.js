@@ -68,14 +68,21 @@ export function summarize(descriptor) {
 }
 
 /**
- * True when the data on hand is older than the source's own refresh interval
- * (with a grace period, so a slow fetch isn't reported as late). A failing
- * source keeps its last good `fetchedAt`, so this is how "still serving stale
- * bytes" becomes visible without reading the error.
+ * True when we have not managed to VERIFY this source against upstream for
+ * longer than its own interval (with a grace period, so a slow fetch isn't
+ * reported as late).
+ *
+ * Measured on `checkedAt`, not `fetchedAt`: an artifact keeps the fetchedAt of
+ * the version it holds, so a monthly bulk that legitimately hasn't changed
+ * since March would read as stale forever. What matters is whether the last
+ * CHECK succeeded — a failing source stops advancing checkedAt, which is
+ * exactly when "still serving old bytes" becomes true.
  */
 function isStale(descriptor, st) {
-  if (!st || !st.fetchedAt) return true;
-  const age = Date.now() - new Date(st.fetchedAt).getTime();
+  if (!st) return true;
+  const last = st.checkedAt || st.fetchedAt;
+  if (!last) return true;
+  const age = Date.now() - new Date(last).getTime();
   return age > descriptor.refreshMs * 1.5;
 }
 
