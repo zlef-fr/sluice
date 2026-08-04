@@ -7,6 +7,7 @@ import { getAdapter } from './adapters/index.js';
 import { runTransform } from './transforms/index.js';
 import { saveFeed, setStatus, getStatus, getFeed } from './store.js';
 import { saveArtifact, touchArtifact, getIndex, summarizeIndex, restoreArtifact } from './artifacts.js';
+import { recordRun } from './runs.js';
 import { nowIso } from './util.js';
 
 // in-flight guard so concurrent triggers (scheduler + manual) don't double-fetch
@@ -17,9 +18,18 @@ export function refreshSource(descriptor, opts = {}) {
   // A forced refetch must not be answered by an in-flight normal refresh — that
   // one may legitimately conclude "unchanged" and leave the bytes missing.
   if (inFlight.has(id) && !opts.force) return inFlight.get(id);
-  const p = doRefresh(descriptor, opts).finally(() => {
-    if (inFlight.get(id) === p) inFlight.delete(id);
-  });
+  const startedAt = nowIso();
+  // ONE place records history, because doRefresh has five successful exits (a
+  // record feed, a new artifact, a 304, a restored eviction, a failure) and a
+  // per-exit call is a per-exit chance to forget one. doRefresh never throws.
+  const p = doRefresh(descriptor, opts)
+    .then((r) => {
+      recordRun(id, r, { startedAt, trigger: opts.trigger || 'manual' });
+      return r;
+    })
+    .finally(() => {
+      if (inFlight.get(id) === p) inFlight.delete(id);
+    });
   inFlight.set(id, p);
   return p;
 }

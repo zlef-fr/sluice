@@ -5,20 +5,34 @@ import { allDescriptors, getStatus, getFeed } from './store.js';
 import { refreshSource } from './fetcher.js';
 
 const timers = new Map();
+// id → epoch ms of the next scheduled tick. Kept alongside the timer because a
+// Node timer will not tell you when it fires, and "when does this run again" is
+// the first thing anyone watching an ETL asks. A manual refresh deliberately
+// does NOT move it — the interval keeps its own rhythm.
+const nextAt = new Map();
 
 export function scheduleSource(descriptor) {
   unschedule(descriptor.id);
   const t = setInterval(() => {
-    refreshSource(descriptor);
+    nextAt.set(descriptor.id, Date.now() + descriptor.refreshMs);
+    refreshSource(descriptor, { trigger: 'schedule' });
   }, descriptor.refreshMs);
   t.unref?.();
   timers.set(descriptor.id, t);
+  nextAt.set(descriptor.id, Date.now() + descriptor.refreshMs);
 }
 
 export function unschedule(id) {
   const t = timers.get(id);
   if (t) clearInterval(t);
   timers.delete(id);
+  nextAt.delete(id);
+}
+
+/** When this source's timer fires next, as an ISO string (null if unscheduled). */
+export function nextRunAt(id) {
+  const at = nextAt.get(id);
+  return at ? new Date(at).toISOString() : null;
 }
 
 // Decide whether a source needs an immediate refresh at boot.
@@ -37,7 +51,7 @@ export async function bootScheduler() {
   for (const d of list) {
     scheduleSource(d);
     if (await isStale(d)) {
-      setTimeout(() => refreshSource(d), delay);
+      setTimeout(() => refreshSource(d, { trigger: 'boot' }), delay);
       delay += 1500; // stagger upstream hits by 1.5s
     }
   }

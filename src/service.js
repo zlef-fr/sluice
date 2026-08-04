@@ -6,7 +6,8 @@ import {
 } from './store.js';
 import { normalizeDescriptor } from './registry.js';
 import { refreshSource } from './fetcher.js';
-import { scheduleSource, unschedule } from './scheduler.js';
+import { scheduleSource, unschedule, nextRunAt } from './scheduler.js';
+import { sourceRuns, recentRuns, runStats, forgetRuns } from './runs.js';
 import { toGeoJson } from './geojson.js';
 
 // A compact, wire-safe view of a source (descriptor sans internals + status).
@@ -23,6 +24,12 @@ export function summarize(descriptor) {
     adapter: descriptor.adapter,
     transform: typeof descriptor.transform === 'string' ? descriptor.transform : 'map',
     refresh: descriptor.refresh,
+    refreshMs: descriptor.refreshMs,
+    // When the timer fires next, and whether the data we hold has already
+    // outlived the interval it promised (an upstream that 502s all night leaves
+    // a green "ok" status pointing at yesterday's bytes).
+    nextRunAt: nextRunAt(descriptor.id),
+    stale: isStale(descriptor, st),
     geo: !!(descriptor.geo && descriptor.geo.lat && descriptor.geo.lon),
     tags: descriptor.tags,
     license: descriptor.license,
@@ -43,14 +50,33 @@ export function summarize(descriptor) {
           itemCount: st.itemCount ?? null,
           version: st.version || null,
           bytes: st.bytes ?? null,
+          storedBytes: st.storedBytes ?? null,
+          durationMs: st.durationMs ?? null,
+          lastErrorAt: st.lastErrorAt || null,
           unchanged: st.unchanged ?? null,
           error: st.error || null,
         }
       : {
           state: 'pending', fetchedAt: null, checkedAt: null, itemCount: null,
-          version: null, bytes: null, unchanged: null, error: null,
+          version: null, bytes: null, storedBytes: null, durationMs: null,
+          lastErrorAt: null, unchanged: null, error: null,
         },
+    // Rolling health over the kept run history — one green fetch says nothing
+    // about a source that fails half the time.
+    history: runStats(descriptor.id),
   };
+}
+
+/**
+ * True when the data on hand is older than the source's own refresh interval
+ * (with a grace period, so a slow fetch isn't reported as late). A failing
+ * source keeps its last good `fetchedAt`, so this is how "still serving stale
+ * bytes" becomes visible without reading the error.
+ */
+function isStale(descriptor, st) {
+  if (!st || !st.fetchedAt) return true;
+  const age = Date.now() - new Date(st.fetchedAt).getTime();
+  return age > descriptor.refreshMs * 1.5;
 }
 
 export function listSources() {
@@ -90,13 +116,14 @@ export async function registerSource(input, { owner } = {}) {
   await putDescriptor(norm.descriptor);
   scheduleSource(norm.descriptor);
   // Kick off the first fetch in the background; caller doesn't wait on upstream.
-  if (!skipFetch) refreshSource(norm.descriptor);
+  if (!skipFetch) refreshSource(norm.descriptor, { trigger: 'register' });
   return { ok: true, source: summarize(norm.descriptor) };
 }
 
 export async function deleteSource(id) {
   if (!hasSource(id)) return false;
   unschedule(id);
+  forgetRuns(id);
   await removeSource(id);
   return true;
 }
@@ -104,11 +131,21 @@ export async function deleteSource(id) {
 // Force a refresh and wait for it. Returns {ok, status} or null if unknown id.
 // `force` additionally skips every not-modified shortcut — used when the bytes of
 // an artifact were evicted and a consumer needs them back.
-export async function refreshNow(id, { force = false } = {}) {
+export async function refreshNow(id, { force = false, trigger = 'manual' } = {}) {
   const d = getDescriptor(id);
   if (!d) return null;
-  const r = await refreshSource(d, { force });
+  const r = await refreshSource(d, { force, trigger });
   return { ...r, source: summarize(d) };
+}
+
+// ── run history ─────────────────────────────────────────────────────────────
+export function sourceHistory(id, limit) {
+  if (!hasSource(id)) return null;
+  return { id, runs: sourceRuns(id, limit), stats: runStats(id) };
+}
+
+export function fleetHistory(opts) {
+  return recentRuns(opts);
 }
 
 export async function feedPayload(id) {

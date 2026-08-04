@@ -12,6 +12,9 @@ normalized feed**. Sluice does the fetching, parsing, enrichment, scheduling and
   its metadata (`/meta`), or a **GeoJSON** projection (`/:id.geojson`) for maps.
 - ⏱ **Scheduled refresh** — per-source interval, staggered, restart-aware (won't re-hammer
   upstreams), one broken source never breaks the others.
+- 📜 **Run history** — every refresh is recorded (outcome, duration, item count, whether the
+  data actually changed, what triggered it), per source and as one fleet timeline, so an
+  intermittent failure or a feed that quietly stopped changing is visible.
 - 🧩 **Adapters + transforms** — pluggable fetch/parse (`http-json`, `http-csv`,
   `http-zip-xml`, `ods-export`) and normalize steps (declarative field-mapping or named code).
 - 🤖 **MCP server** — every source is discoverable and pullable as a tool by Claude / agents.
@@ -202,7 +205,9 @@ depends on them being present.
 | POST   | `/api/sources`                | write  | self-register (or update)        |
 | PUT    | `/api/sources/:id`            | write  | update by id                     |
 | DELETE | `/api/sources/:id`            | write  | remove                           |
-| POST   | `/api/sources/:id/refresh`    | write  | force re-fetch (awaits)          |
+| POST   | `/api/sources/:id/refresh`    | write  | force re-fetch (awaits); `?force=1` also skips not-modified shortcuts |
+| GET    | `/api/sources/:id/runs`       | read   | refresh history of one source + rolling stats |
+| GET    | `/api/runs`                   | read   | fleet refresh timeline (`?limit=&id=&failed=1`) |
 | GET    | `/api/feed/:id`               | read   | full feed `{fetchedAt,meta,data}`|
 | GET    | `/api/feed/:id/meta`          | read   | metadata only                    |
 | GET    | `/api/feed/:id.geojson`       | read   | GeoJSON projection               |
@@ -243,7 +248,8 @@ consuming app uses at boot.
 ## MCP
 
 Point any MCP client at `POST http://<host>/mcp`. Tools: `list_sources`, `get_source`,
-`get_feed`, `feed_meta`, `search_feed`, `register_source`, `refresh_source`.
+`get_feed`, `feed_meta`, `search_feed`, `list_versions`, `register_source`, `refresh_source`,
+`source_runs`.
 
 ## Exploration & dashboards
 
@@ -395,6 +401,7 @@ was last *verified* (updated even on a 304).
 | `SLUICE_ARTIFACT_TTL`  | *(unset)*              | default `options.ttl` — evict artifact bytes after this age |
 | `SLUICE_EVICT_INTERVAL_MS` | `1800000`          | how often the eviction sweep runs   |
 | `SLUICE_MIN_REFRESH_MS`| `300000`               | global refresh floor (protect upstreams) |
+| `SLUICE_RUN_KEEP`      | `40`                   | refresh runs kept per source (history)   |
 
 ## License
 

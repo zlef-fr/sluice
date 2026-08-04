@@ -5,6 +5,7 @@
 // POSTs JSON-RPC and gets an application/json response (see routes/mcp.js).
 import {
   listSources, getSource, registerSource, refreshNow, feedPayload, feedMeta,
+  sourceHistory, fleetHistory,
 } from './service.js';
 import { WRITE_TOKEN } from './config.js';
 import { getIndex, summarizeIndex } from './artifacts.js';
@@ -150,13 +151,37 @@ const TOOLS = [
     description: 'Force an immediate re-fetch of a source (requires the write token).',
     inputSchema: {
       type: 'object',
-      properties: { token: { type: 'string' }, id: { type: 'string' } },
+      properties: {
+        token: { type: 'string' },
+        id: { type: 'string' },
+        force: { type: 'boolean', description: 'also skip every not-modified shortcut (re-download)' },
+      },
       required: ['token', 'id'],
     },
-    handler: async ({ token, id }) => {
+    handler: async ({ token, id, force = false }) => {
       if (!WRITE_TOKEN || token !== WRITE_TOKEN) return fail('invalid write token');
-      const r = await refreshNow(id);
+      const r = await refreshNow(id, { force: !!force, trigger: 'mcp' });
       return r ? ok(r) : fail(`unknown source "${id}"`);
+    },
+  },
+  {
+    name: 'source_runs',
+    description:
+      'Refresh history of a source (newest first) plus rolling stats — how often it fails, '
+      + 'how often the data actually changed, how long a fetch takes. Omit `id` for the '
+      + 'whole fleet\'s activity on one timeline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'source id; omit for the fleet timeline' },
+        limit: { type: 'number', description: 'max runs (default 40)' },
+        failed: { type: 'boolean', description: 'fleet timeline only: keep failures' },
+      },
+    },
+    handler: async ({ id, limit, failed = false }) => {
+      if (!id) return ok({ runs: fleetHistory({ limit, failedOnly: !!failed }) });
+      const h = sourceHistory(id, limit);
+      return h ? ok(h) : fail(`unknown source "${id}"`);
     },
   },
 ];

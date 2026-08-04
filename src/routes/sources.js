@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { requireWrite, requireRead } from '../auth.js';
 import {
-  listSources, getSource, registerSource, deleteSource, refreshNow,
+  listSources, getSource, registerSource, deleteSource, refreshNow, sourceHistory,
 } from '../service.js';
 
 const router = Router();
@@ -40,8 +40,18 @@ router.delete('/:id', requireWrite, async (req, res) => {
   res.json({ ok: true, deleted: req.params.id });
 });
 
+// The refresh history of one source, newest first.
+router.get('/:id/runs', requireRead, (req, res) => {
+  const h = sourceHistory(req.params.id, req.query.limit);
+  if (!h) return res.status(404).json({ error: 'unknown source' });
+  res.json(h);
+});
+
+// `force` additionally skips every not-modified shortcut — the re-download an
+// operator wants when the bytes are gone or the upstream lied about its ETag.
 router.post('/:id/refresh', requireWrite, async (req, res) => {
-  const r = await refreshNow(req.params.id);
+  const force = req.query.force === '1' || req.query.force === 'true' || !!(req.body || {}).force;
+  const r = await refreshNow(req.params.id, { force });
   if (!r) return res.status(404).json({ error: 'unknown source' });
   res.status(r.ok ? 200 : 502).json(r);
 });
