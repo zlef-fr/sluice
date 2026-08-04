@@ -11,20 +11,38 @@ const timers = new Map();
 // does NOT move it — the interval keeps its own rhythm.
 const nextAt = new Map();
 
+// Node stores a timer delay in a SIGNED 32-BIT int: anything above ~24.8 days
+// silently becomes **1 ms**. `refresh: "30d"` (the artifact sources) therefore
+// did not fire monthly — it fired continuously, re-probing data.gouv.fr several
+// times a second, for as long as the process was up. Long intervals are waited
+// out in chunks instead, re-arming until the due date actually arrives.
+const MAX_DELAY = 2 ** 31 - 1;
+
+function arm(descriptor, dueAt) {
+  const id = descriptor.id;
+  const t = setTimeout(() => {
+    // Woke up early because the wait was longer than one timer can hold — go
+    // back to sleep for the next chunk rather than refreshing now.
+    if (Date.now() < dueAt - 50) { arm(descriptor, dueAt); return; }
+    const next = Date.now() + descriptor.refreshMs;
+    nextAt.set(id, next);
+    arm(descriptor, next);
+    refreshSource(descriptor, { trigger: 'schedule' });
+  }, Math.max(0, Math.min(MAX_DELAY, dueAt - Date.now())));
+  t.unref?.();
+  timers.set(id, t);
+}
+
 export function scheduleSource(descriptor) {
   unschedule(descriptor.id);
-  const t = setInterval(() => {
-    nextAt.set(descriptor.id, Date.now() + descriptor.refreshMs);
-    refreshSource(descriptor, { trigger: 'schedule' });
-  }, descriptor.refreshMs);
-  t.unref?.();
-  timers.set(descriptor.id, t);
-  nextAt.set(descriptor.id, Date.now() + descriptor.refreshMs);
+  const due = Date.now() + descriptor.refreshMs;
+  nextAt.set(descriptor.id, due);
+  arm(descriptor, due);
 }
 
 export function unschedule(id) {
   const t = timers.get(id);
-  if (t) clearInterval(t);
+  if (t) clearTimeout(t);
   timers.delete(id);
   nextAt.delete(id);
 }
