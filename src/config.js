@@ -14,6 +14,14 @@ export const FEEDS_DIR = join(DATA_DIR, 'feeds');
 export const ARTIFACTS_DIR = join(DATA_DIR, 'artifacts');
 // Superseded record-feed snapshots, gzipped, one file per version.
 export const ARCHIVE_DIR = join(DATA_DIR, 'archive');
+// Refresh history (see runs.js) — a state tells you a source is green now, a
+// history tells you it has failed every night this week.
+export const RUNS_FILE = join(DATA_DIR, 'runs.json');
+
+// How many runs are kept per source. 40 ≈ a week of a 4h source, a month of a
+// daily one — enough to see a pattern, small enough to keep in memory and in one
+// JSON file for the whole fleet.
+export const RUN_KEEP = Math.max(1, Number(process.env.SLUICE_RUN_KEEP ?? 40));
 
 // How many SUPERSEDED versions to keep per data set, on top of the current one.
 // 2 → latest + 2 archives. Bounded on purpose: raw open-data bulks are hundreds

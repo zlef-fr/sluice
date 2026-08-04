@@ -28,7 +28,7 @@ async function ensureDirs() {
 // ENOENT. That surfaced for real when 32 sources registered at once and each
 // setStatus persisted the registry.
 let writeSeq = 0;
-async function atomicWrite(file, str) {
+export async function atomicWrite(file, str) {
   const tmp = `${file}.${process.pid}.${++writeSeq}.tmp`;
   try {
     await writeFile(tmp, str);

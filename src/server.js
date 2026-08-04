@@ -12,6 +12,7 @@ import { reconcile } from './artifacts.js';
 import { normalizeDescriptor } from './registry.js';
 import { initTransforms } from './transforms/index.js';
 import { bootScheduler } from './scheduler.js';
+import { loadRuns } from './runs.js';
 import { startEvictor } from './evictor.js';
 import { SEED_SOURCES } from './seed.js';
 import { SEED_DASHBOARDS } from './seed-dashboards.js';
@@ -19,6 +20,7 @@ import { loadDashboards, getDashboard, putDashboard, normalizeDashboard } from '
 import { listSources } from './service.js';
 
 import sourcesRouter from './routes/sources.js';
+import runsRouter from './routes/runs.js';
 import feedRouter from './routes/feed.js';
 import { artifactRouter, archiveRouter } from './routes/artifact.js';
 import exploreRouter from './routes/explore.js';
@@ -70,6 +72,7 @@ async function reconcileArtifacts() {
 
 async function main() {
   await loadRegistry();
+  await loadRuns();
   await seed();
   await loadDashboards();
   await seedDashboards();
@@ -104,6 +107,7 @@ async function main() {
   });
 
   app.use('/api/sources', sourcesRouter);
+  app.use('/api/runs', runsRouter);
   app.use('/api/feed', feedRouter);
   app.use('/api/artifact', artifactRouter);
   app.use('/api/archive', archiveRouter);
