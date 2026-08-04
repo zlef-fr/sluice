@@ -25,6 +25,8 @@ export function summarize(descriptor) {
     transform: typeof descriptor.transform === 'string' ? descriptor.transform : 'map',
     refresh: descriptor.refresh,
     refreshMs: descriptor.refreshMs,
+    // A frozen data set is fetched once and then left alone (refresh: "never").
+    frozen: !!descriptor.frozen,
     // When the timer fires next, and whether the data we hold has already
     // outlived the interval it promised (an upstream that 502s all night leaves
     // a green "ok" status pointing at yesterday's bytes).
@@ -79,6 +81,9 @@ export function summarize(descriptor) {
  * exactly when "still serving old bytes" becomes true.
  */
 function isStale(descriptor, st) {
+  // Nothing upstream can change, so old bytes are the CORRECT bytes: a closed
+  // budget year is never stale, however long ago we fetched it.
+  if (descriptor.frozen || !descriptor.refreshMs) return false;
   if (!st) return true;
   const last = st.checkedAt || st.fetchedAt;
   if (!last) return true;
@@ -114,10 +119,14 @@ export async function registerSource(input, { owner } = {}) {
   // fetch here would probe every source on every pipeline run. Only fetch when
   // something about the contract changed, or the current data is older than its
   // own interval.
-  const fresh =
-    st?.status === 'ok' &&
-    st.checkedAt &&
-    Date.now() - new Date(st.checkedAt).getTime() < norm.descriptor.refreshMs;
+  const fresh = norm.descriptor.frozen
+    // A frozen source is "fresh" forever once it has been fetched — consumers
+    // re-register on every build, and each one would otherwise re-download a
+    // file that is closed for good.
+    ? st?.status === 'ok'
+    : st?.status === 'ok' &&
+      st.checkedAt &&
+      Date.now() - new Date(st.checkedAt).getTime() < norm.descriptor.refreshMs;
   const skipFetch = sameFetchContract(existing, norm.descriptor) && fresh;
 
   await putDescriptor(norm.descriptor);

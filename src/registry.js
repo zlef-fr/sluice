@@ -39,9 +39,22 @@ export function normalizeDescriptor(input, { owner } = {}) {
     return err('a `url` (or an adapter-specific `source` object, or `options.resolve`) is required');
   }
 
-  const refreshMs = parseDuration(input.refresh) ?? DEFAULT_REFRESH_MS;
-  if (refreshMs == null || refreshMs <= 0) return err('`refresh` is not a valid duration');
-  const clamped = Math.max(refreshMs, MIN_REFRESH_MS);
+  // `refresh: "never"` — a FROZEN data set: a closed budget year, a finished
+  // election, an archived snapshot. It is fetched once and then left alone; no
+  // timer, and it can never be "stale", because there is nothing upstream that
+  // could still change. A manual refresh still works — that is the escape hatch
+  // when a publisher does silently re-issue a closed file.
+  const frozen = /^(never|once|frozen)$/i.test(String(input.refresh || '').trim());
+  // An UNPARSEABLE refresh used to fall back to 6h in silence, so a typo just
+  // changed the schedule instead of failing — and now that "never" is a word, a
+  // mistyped one would quietly re-download a closed data set forever. Absent is
+  // still fine (that is what the default is for); wrong is not.
+  const parsed = input.refresh == null || input.refresh === '' ? DEFAULT_REFRESH_MS : parseDuration(input.refresh);
+  const refreshMs = frozen ? null : parsed;
+  if (!frozen && (refreshMs == null || refreshMs <= 0)) {
+    return err(`\`refresh\` is not a valid duration (e.g. "6h", "30d") or "never": ${JSON.stringify(input.refresh)}`);
+  }
+  const clamped = frozen ? null : Math.max(refreshMs, MIN_REFRESH_MS);
 
   const descriptor = {
     ...input,
@@ -53,8 +66,9 @@ export function normalizeDescriptor(input, { owner } = {}) {
     url: input.url || null,
     source: input.source || null,
     options: input.options || {},
-    refresh: input.refresh || '6h',
+    refresh: frozen ? 'never' : (input.refresh || '6h'),
     refreshMs: clamped,
+    frozen,
     geo: input.geo || null, // {lat, lon} field paths for geojson projection
     license: input.license || '',
     homepage: input.homepage || '',
