@@ -37,9 +37,11 @@ export async function sweepEvictions() {
 
 export function startEvictor() {
   sweepEvictions().catch((e) => console.error('[sluice] eviction sweep failed:', e.message));
+  // Clamped for the same reason the scheduler chunks its waits: a delay above
+  // 2^31-1 ms silently becomes 1 ms, turning a sweep into a spin.
   const t = setInterval(() => {
     sweepEvictions().catch((e) => console.error('[sluice] eviction sweep failed:', e.message));
-  }, EVICT_INTERVAL_MS);
+  }, Math.min(2 ** 31 - 1, EVICT_INTERVAL_MS));
   t.unref?.();
   return t;
 }
