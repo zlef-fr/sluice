@@ -16,6 +16,7 @@
 //   filename   name to store as / hand back (default: URL basename)
 //   compress   'auto' (default) | true | false — gzip on disk unless already compressed
 //   resolve    { type:'github-latest-release', repo:'owner/name', asset:'x.csv.gz' }
+//              | { type:'dir-index-latest', url:'https://host/dir/', match:'^LEGI_.*\\.tar\\.gz$' }
 //   probe      { type:'ods-dataset', url } | { type:'http-head', url? }
 //   headers    extra request headers, e.g. a User-Agent an origin's bot filter accepts
 import { USER_AGENT } from '../config.js';
@@ -44,6 +45,35 @@ async function resolveUrl(descriptor) {
       probeKey: `${r.repo}@${tag}`,
     };
   }
+  // An upstream that publishes one dated file per run into a plain directory
+  // index — DILA's legal dumps (LEGI_20260805-214530.tar.gz) are the case this
+  // was written for. The newest NAME is the newest file: their names are
+  // zero-padded ISO-ish, so lexicographic order IS chronological, and no date
+  // has to be parsed or guessed. The name is also the version key: a run that
+  // resolves to the same file downloads nothing.
+  if (r.type === 'dir-index-latest') {
+    if (!r.url || !r.match) throw new Error('resolve.dir-index-latest needs {url, match}');
+    const res = await fetch(r.url, {
+      headers: { 'User-Agent': USER_AGENT, accept: 'text/html', ...extraHeaders(descriptor) },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${r.url}`);
+    const html = await res.text();
+    // `match` is a source-authored pattern, so it is compiled fresh (no lastIndex
+    // carried between runs) and applied to hrefs only — not to the whole page,
+    // where a filename mentioned in prose would win.
+    const re = new RegExp(r.match);
+    const names = [...html.matchAll(/href="([^"?][^"]*)"/g)]
+      .map((m) => decodeURIComponent(m[1]))
+      .filter((n) => !n.includes('/') && re.test(n));
+    if (!names.length) throw new Error(`no file matching ${r.match} in ${r.url}`);
+    const latest = names.sort()[names.length - 1];
+    return {
+      url: new URL(latest, r.url.endsWith('/') ? r.url : `${r.url}/`).href,
+      // The filename IS the version — same name, same bytes.
+      probeKey: `dir:${latest}`,
+    };
+  }
+
   throw new Error(`unknown resolve.type "${r.type}"`);
 }
 
