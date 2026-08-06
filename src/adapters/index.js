@@ -9,6 +9,7 @@ import odsExport from './ods-export.js';
 import dvfGeo from './dvf-geo.js';
 import melodiIpc from './melodi-ipc.js';
 import sncfLost from './sncf-lost.js';
+import hubeauPaginated from './hubeau-paginated.js';
 
 const ADAPTERS = {
   'http-json': httpJson,
@@ -19,6 +20,7 @@ const ADAPTERS = {
   'dvf-geo': dvfGeo,
   'melodi-ipc': melodiIpc,
   'sncf-lost': sncfLost,
+  'hubeau-paginated': hubeauPaginated,
 };
 
 export function hasAdapter(name) {

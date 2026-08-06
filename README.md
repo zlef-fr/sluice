@@ -131,6 +131,7 @@ A **source descriptor** is the contract you register:
 | `melodi-ipc`    | INSEE *melodi* SDMX API — assembles a multi-query index (all-items + COICOP sub-indices + weights) into one flat feed, with polite `429`/`503` backoff |
 | `sncf-lost`     | SNCF lost-property ODS dataset, aggregated inline (avoids the 1.5M-row raw table) |
 | `http-artifact` | keeps the **file itself**, versioned, instead of parsing records — for build inputs (zip dumps, hundred-MB bulk exports). See [File artifacts](#file-artifacts). |
+| `hubeau-paginated` | walks Hub'Eau's cursor pagination to the end and stores the whole result set as one CSV/NDJSON artifact. **Refuses to emit a short read**: Hub'Eau caps a response at `size` rows and truncates in silence, so the adapter asserts the row count against the `count` the API declared. See [Hub'Eau](#hubeau). |
 
 Adapters live in `src/adapters/` and return raw records; drop a new file in that
 folder and register it in `src/adapters/index.js` to add your own. The
@@ -369,6 +370,46 @@ curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T0415
 
 `options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `ttl`, `retries`,
 `probe`, `resolve`.
+
+## Hub'Eau
+
+`hubeau.eaufrance.fr` exposes France's water data, and it has one trap worth an
+adapter of its own: **a response is capped at `size` rows and the cap is silent.**
+The body still reports a `count` for the whole result set, but `data` holds only the
+first page. Ask for a dataset in one call and you get a well-formed, plausible,
+*wrong* file — no error, no warning, no clue in the HTTP status.
+
+`hubeau-paginated` follows the API's own `next` cursor to the end and then **asserts
+the row count against the declared `count`**. A short read raises; it never ships.
+
+```json
+{
+  "id": "fr-hydro-qmm",
+  "adapter": "hubeau-paginated",
+  "url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie/obs_elab?grandeur_hydro_elab=QmM&size=20000&fields=code_site,code_station,date_obs_elab,resultat_obs_elab",
+  "options": {
+    "filename": "hubeau-qmm-fr.csv",
+    "columns": ["code_station", "date_obs_elab", "resultat_obs_elab"],
+    "where": [{ "field": "code_station", "notNull": true }]
+  },
+  "refresh": "24h"
+}
+```
+
+`options`: `filename`, `format` (`csv` default | `ndjson`), `columns` (required for
+csv), `where`, `maxPages` (default 5000), `compress`, `keep`, `headers`.
+
+**`where` exists because of a second Hub'Eau quirk.** Several endpoints return the
+same measurement twice — once against the *site*, once against the *station* on it.
+On `obs_elab` that is ~47 % of rows, arriving with `code_station: null`. A consumer
+joining on the station referential drops them anyway, so declaring the filter halves
+the artifact instead of leaving a million rows keyed on the string `"null"`. Whatever
+it removes is **counted and logged**, never silently discarded.
+
+There is deliberately **no probe**: these endpoints emit no ETag, and `count` alone
+would miss a corrected value. The file is downloaded each refresh and its sha256
+decides whether a new version is minted — one download per interval, for the whole
+fleet, which is the trade Sluice exists to make.
 
 ## Caching & upstream politeness
 
