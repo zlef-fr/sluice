@@ -350,6 +350,22 @@ curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T0415
   connection seconds into its 296 MB amendements zip when a content-encoding is negotiated.)
 - **A daily refresh is cheap.** See the probe layers below.
 - **Interrupted transfers are retried** (`options.retries`, default 3, with backoff).
+- **An upstream that publishes one file per day** needs no listing at all — its URL is a
+  function of the date. `resolve: { type: 'dated-url' }` expands `{{YYYY}}` `{{YY}}`
+  `{{MM}}` `{{DD}}` against **today in UTC**, walking back `lookback` days (default 1) with
+  a `HEAD` until one exists, so the hour after midnight doesn't fail on a file the upstream
+  hasn't written yet. `offsetDays` shifts the target day (`-1` = always yesterday, for a
+  stream you only want complete). It returns **no probe key on purpose**: a file that keeps
+  growing through its own day (LCSQA appends each hour to `FR_E2_<date>.csv`) would
+  otherwise freeze on the day's first snapshot, since the name never moves.
+
+  ```json
+  { "adapter": "http-artifact",
+    "options": { "resolve": { "type": "dated-url",
+      "url": "https://files.data.gouv.fr/…/temps-reel/{{YYYY}}/FR_E2_{{YYYY}}-{{MM}}-{{DD}}.csv" },
+      "probe": { "type": "http-head" } },
+    "refresh": "1h" }
+  ```
 
 `options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `ttl`, `retries`,
 `probe`, `resolve`.

@@ -17,6 +17,8 @@
 //   compress   'auto' (default) | true | false — gzip on disk unless already compressed
 //   resolve    { type:'github-latest-release', repo:'owner/name', asset:'x.csv.gz' }
 //              | { type:'dir-index-latest', url:'https://host/dir/', match:'^LEGI_.*\\.tar\\.gz$' }
+//              | { type:'dated-url', url:'https://host/{{YYYY}}/F_{{YYYY}}-{{MM}}-{{DD}}.csv',
+//                  lookback:1, offsetDays:0 }
 //   probe      { type:'ods-dataset', url } | { type:'http-head', url? }
 //   headers    extra request headers, e.g. a User-Agent an origin's bot filter accepts
 import { USER_AGENT } from '../config.js';
@@ -27,6 +29,15 @@ async function getJson(url) {
   const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT, accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
   return res.json();
+}
+
+// Expand {{YYYY}}/{{YY}}/{{MM}}/{{DD}} in a URL template against a UTC date.
+function stampDate(template, d) {
+  return template
+    .replace(/\{\{YYYY\}\}/g, String(d.getUTCFullYear()))
+    .replace(/\{\{YY\}\}/g, String(d.getUTCFullYear()).slice(2))
+    .replace(/\{\{MM\}\}/g, String(d.getUTCMonth() + 1).padStart(2, '0'))
+    .replace(/\{\{DD\}\}/g, String(d.getUTCDate()).padStart(2, '0'));
 }
 
 // ── layer 1: resolve a versioned URL ────────────────────────────────────────
@@ -72,6 +83,43 @@ async function resolveUrl(descriptor) {
       // The filename IS the version — same name, same bytes.
       probeKey: `dir:${latest}`,
     };
+  }
+
+  // An upstream whose path is a pure function of the calendar day — LCSQA's
+  // hourly air-quality stream (…/temps-reel/2026/FR_E2_2026-08-06.csv) is the
+  // case this was written for. There is nothing to list: today's URL is
+  // computable, so the only question is whether it exists yet. A file that is
+  // rewritten through the day (LCSQA appends each hour) must NOT get a probe
+  // key from its name — that would freeze the first snapshot of the day — so
+  // this resolver deliberately returns `probeKey: null` and lets the probe /
+  // conditional-GET / sha256 layers below decide.
+  if (r.type === 'dated-url') {
+    const template = r.url || descriptor.url;
+    if (!template || !/\{\{(YYYY|YY|MM|DD)\}\}/.test(template)) {
+      throw new Error('resolve.dated-url needs a url with {{YYYY}}/{{MM}}/{{DD}} placeholders');
+    }
+    // Days are counted in UTC: LCSQA timestamps metropolitan France in UTC, and
+    // a host-local day boundary would ask for tomorrow's file for an hour each
+    // evening. `lookback` covers the gap after midnight (and any publication
+    // lag) by walking back a day at a time until a HEAD answers.
+    const now = new Date();
+    const base = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      + (Number(r.offsetDays) || 0) * 86400000;
+    const lookback = Math.max(0, Number(r.lookback ?? 1));
+    const candidates = [];
+    for (let back = 0; back <= lookback; back++) {
+      candidates.push(stampDate(template, new Date(base - back * 86400000)));
+    }
+    for (const url of candidates.slice(0, -1)) {
+      const exists = await fetch(url, {
+        method: 'HEAD',
+        headers: { 'User-Agent': USER_AGENT, ...extraHeaders(descriptor) },
+      }).then((res) => res.ok, () => false);
+      if (exists) return { url, probeKey: null };
+    }
+    // The oldest candidate is taken without a HEAD: one request less, and a GET
+    // that 404s names the URL it tried — a better error than "nothing matched".
+    return { url: candidates[candidates.length - 1], probeKey: null };
   }
 
   throw new Error(`unknown resolve.type "${r.type}"`);
