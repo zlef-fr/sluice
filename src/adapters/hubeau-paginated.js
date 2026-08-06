@@ -23,6 +23,9 @@
 //     where       optional [{ field, notNull: true }] — rows failing it are dropped
 //                 and the count is REPORTED, never silent. See the note below.
 //     maxPages    safety stop (default 5000)
+//     timeoutMs   per-request timeout (default 120000)
+//     logEvery    log progress every N pages (default 25) — a 144-page walk that
+//                 says nothing for 20 minutes is indistinguishable from a hung one
 //     headers     extra request headers
 //
 // Note on `where`. Several Hub'Eau endpoints return the same measurement twice: once
@@ -43,9 +46,17 @@ function csvCell(v) {
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-async function getJson(url, headers, attempt = 0) {
+async function getJson(url, headers, timeoutMs, attempt = 0) {
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT, accept: 'application/json', ...headers } });
+    // A timeout is not optional here. Without one, a single hung connection parks
+    // the whole refresh forever: the run never completes, so it never fails, so it
+    // never retries — and because the fetcher keeps it in flight, every later
+    // refresh of the source is silently skipped too. Observed in the wild: a
+    // 144-page walk that stopped writing after page 40 and simply sat there.
+    const res = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, accept: 'application/json', ...headers },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     // Hub'Eau is a shared public service: 429 and 5xx are "come back later",
     // not "the data is gone".
     if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
@@ -54,7 +65,7 @@ async function getJson(url, headers, attempt = 0) {
   } catch (err) {
     if (attempt >= 4) throw err;
     await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-    return getJson(url, headers, attempt + 1);
+    return getJson(url, headers, timeoutMs, attempt + 1);
   }
 }
 
@@ -79,6 +90,8 @@ export default async function hubeauPaginated(descriptor, ctx = {}) {
   const filename = opts.filename || `${endpointName(descriptor.url)}.${format === 'csv' ? 'csv' : 'ndjson'}`;
   const maxPages = Number.isFinite(opts.maxPages) ? opts.maxPages : DEFAULT_MAX_PAGES;
   const headers = opts.headers || {};
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 120000;
+  const logEvery = Number.isFinite(opts.logEvery) ? opts.logEvery : 25;
   const where = Array.isArray(opts.where) ? opts.where : [];
   const keeps = (row) => where.every((w) => !w.notNull || (row[w.field] !== null && row[w.field] !== undefined));
 
@@ -91,7 +104,7 @@ export default async function hubeauPaginated(descriptor, ctx = {}) {
         if (format === 'csv') controller.enqueue(new TextEncoder().encode(columns.join(';') + '\n'));
         let url = descriptor.url;
         while (url && stats.pages < maxPages) {
-          const page = await getJson(url, headers);
+          const page = await getJson(url, headers, timeoutMs);
           if (stats.declared === null) stats.declared = page.count ?? null;
           const rows = page.data || [];
           stats.pages += 1;
@@ -106,6 +119,11 @@ export default async function hubeauPaginated(descriptor, ctx = {}) {
                 : JSON.stringify(row) + '\n';
           }
           if (chunk) controller.enqueue(new TextEncoder().encode(chunk));
+          if (logEvery > 0 && stats.pages % logEvery === 0) {
+            console.log(
+              `[sluice] ${descriptor.id}: page ${stats.pages}, ${stats.seen}/${stats.declared ?? '?'} row(s)`,
+            );
+          }
           // `next` is absent (or equal to the current url) on the last page.
           const next = page.next && page.next !== url ? page.next : null;
           url = next;
