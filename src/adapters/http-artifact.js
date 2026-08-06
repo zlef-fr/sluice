@@ -19,6 +19,8 @@
 //              | { type:'dir-index-latest', url:'https://host/dir/', match:'^LEGI_.*\\.tar\\.gz$' }
 //              | { type:'dated-url', url:'https://host/{{YYYY}}/F_{{YYYY}}-{{MM}}-{{DD}}.csv',
 //                  lookback:1, offsetDays:0 }
+//              | { type:'page-link-latest', url:'https://host/page', match:'liste_.*\\.xlsx$',
+//                  key:'/(\\d{8})_', pick:'last' }
 //   probe      { type:'ods-dataset', url } | { type:'http-head', url? }
 //   headers    extra request headers, e.g. a User-Agent an origin's bot filter accepts
 import { USER_AGENT } from '../config.js';
@@ -82,6 +84,56 @@ async function resolveUrl(descriptor) {
       url: new URL(latest, r.url.endsWith('/') ? r.url : `${r.url}/`).href,
       // The filename IS the version — same name, same bytes.
       probeKey: `dir:${latest}`,
+    };
+  }
+
+  // An upstream that keeps ONE landing page and re-links a freshly dated file
+  // from it — europe-en-france.gouv.fr republishes the FEDER/FSE+/FTJ list of
+  // operations ~5×/year at /sites/default/files/2026-03/20260316_liste_….xlsx,
+  // and the page is the only place that names the current one. `dir-index-latest`
+  // cannot read it: these hrefs carry a path, and the page also links PDFs,
+  // previous years and unrelated annexes, so the pattern has to select.
+  //
+  // Requires a URL that carries its own version (a date, an edition number):
+  // the resolved URL IS the probe key, so an upstream that overwrote one stable
+  // URL would never be seen changing. That is exactly the case `dated-url`
+  // above refuses a probe key for.
+  if (r.type === 'page-link-latest') {
+    if (!r.url || !r.match) throw new Error('resolve.page-link-latest needs {url, match}');
+    const res = await fetch(r.url, {
+      headers: { 'User-Agent': USER_AGENT, accept: 'text/html', ...extraHeaders(descriptor) },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${r.url}`);
+    const html = await res.text();
+    const re = new RegExp(r.match);
+    // `match` and `key` are applied to the ABSOLUTE url, so a pattern can pin
+    // the host as well as the filename. Relative hrefs are resolved against the
+    // page — a Drupal file link is usually root-relative.
+    const urls = [...new Set(
+      [...html.matchAll(/href="([^"]+)"/g)]
+        .map((m) => m[1].replace(/&amp;/g, '&').trim())
+        .filter((h) => h && !h.startsWith('#'))
+        .map((h) => { try { return new URL(h, r.url).href; } catch { return null; } })
+        .filter((h) => h && re.test(h)),
+    )];
+    if (!urls.length) throw new Error(`no link matching ${r.match} on ${r.url}`);
+    // Sorting the whole URL works when the date is zero-padded and sits at the
+    // same place in every edition (20260316_… follows 20251110_…). When it does
+    // not, `key` names the part that orders them.
+    const keyRe = r.key ? new RegExp(r.key) : null;
+    const sortKey = (u) => {
+      if (!keyRe) return u;
+      const m = u.match(keyRe);
+      // A link the key cannot read must not silently sort as the newest.
+      if (!m) throw new Error(`resolve.key ${r.key} does not match ${u}`);
+      return m[1] ?? m[0];
+    };
+    const ranked = urls.map((u) => [sortKey(u), u]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const picked = r.pick === 'first' ? ranked[0][1] : ranked[ranked.length - 1][1];
+    return {
+      url: picked,
+      // The dated URL IS the version — same link, same bytes, nothing fetched.
+      probeKey: `page:${picked}`,
     };
   }
 
