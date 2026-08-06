@@ -368,6 +368,28 @@ curl -o old.zip http://localhost:10099/api/artifact/fr-an-scrutins/20260729T0415
     "refresh": "1h" }
   ```
 
+- **An upstream that re-links a freshly dated file from one landing page** is the other
+  half of that problem: nothing is listable, nothing is computable, and the page is the
+  only place naming the current edition.
+  `resolve: { type: 'page-link-latest', url, match, key?, pick? }` reads the page, keeps
+  the `href`s matching `match` (resolved to absolute URLs first, so the pattern can pin
+  the host as well as the filename), and takes the last in sort order — `key` names the
+  capture that orders them when the whole URL doesn't, `pick: "first"` inverts it. A link
+  `key` cannot read raises rather than sorting as the newest.
+  Unlike `dated-url`, the resolved URL **is** the probe key, so an unchanged link costs
+  one small request and downloads nothing — which also means this resolver is only correct
+  when the URL carries its own version. An upstream overwriting one stable URL must be left
+  to the probe / conditional-GET / sha256 layers.
+
+  ```json
+  { "adapter": "http-artifact",
+    "options": { "resolve": { "type": "page-link-latest",
+      "url": "https://www.europe-en-france.gouv.fr/fr/ressources/liste-operations-feder-fse-ftj-2021-2027",
+      "match": "liste_operations_conventionnees_FEDER.*\\.xlsx$",
+      "key": "/(\\d{8})_" } },
+    "refresh": "7d" }
+  ```
+
 `options`: `filename`, `compress` (`auto`|`true`|`false`), `keep`, `ttl`, `retries`,
 `probe`, `resolve`.
 
