@@ -24,11 +24,11 @@
 //   probe      { type:'ods-dataset', url } | { type:'http-head', url? }
 //   headers    extra request headers, e.g. a User-Agent an origin's bot filter accepts
 import { USER_AGENT } from '../config.js';
-import { conditionalFetch } from './http.js';
+import { conditionalFetch, politeFetch } from './http.js';
 import { latestRecord, streamToStaging } from '../artifacts.js';
 
-async function getJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT, accept: 'application/json' } });
+async function getJson(url, descriptor) {
+  const res = await politeFetch(url, { headers: { 'User-Agent': USER_AGENT, accept: 'application/json' } }, { descriptor });
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
   return res.json();
 }
@@ -49,7 +49,7 @@ async function resolveUrl(descriptor) {
 
   if (r.type === 'github-latest-release') {
     if (!r.repo || !r.asset) throw new Error('resolve.github-latest-release needs {repo, asset}');
-    const rel = await getJson(`https://api.github.com/repos/${r.repo}/releases/latest`);
+    const rel = await getJson(`https://api.github.com/repos/${r.repo}/releases/latest`, descriptor);
     const tag = rel.tag_name;
     if (!tag) throw new Error(`no tag_name in latest release of ${r.repo}`);
     return {
@@ -66,9 +66,9 @@ async function resolveUrl(descriptor) {
   // resolves to the same file downloads nothing.
   if (r.type === 'dir-index-latest') {
     if (!r.url || !r.match) throw new Error('resolve.dir-index-latest needs {url, match}');
-    const res = await fetch(r.url, {
+    const res = await politeFetch(r.url, {
       headers: { 'User-Agent': USER_AGENT, accept: 'text/html', ...extraHeaders(descriptor) },
-    });
+    }, { descriptor });
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${r.url}`);
     const html = await res.text();
     // `match` is a source-authored pattern, so it is compiled fresh (no lastIndex
@@ -100,9 +100,9 @@ async function resolveUrl(descriptor) {
   // above refuses a probe key for.
   if (r.type === 'page-link-latest') {
     if (!r.url || !r.match) throw new Error('resolve.page-link-latest needs {url, match}');
-    const res = await fetch(r.url, {
+    const res = await politeFetch(r.url, {
       headers: { 'User-Agent': USER_AGENT, accept: 'text/html', ...extraHeaders(descriptor) },
-    });
+    }, { descriptor });
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${r.url}`);
     const html = await res.text();
     const re = new RegExp(r.match);
@@ -163,10 +163,10 @@ async function resolveUrl(descriptor) {
       candidates.push(stampDate(template, new Date(base - back * 86400000)));
     }
     for (const url of candidates.slice(0, -1)) {
-      const exists = await fetch(url, {
+      const exists = await politeFetch(url, {
         method: 'HEAD',
         headers: { 'User-Agent': USER_AGENT, ...extraHeaders(descriptor) },
-      }).then((res) => res.ok, () => false);
+      }, { descriptor }).then((res) => res.ok, () => false);
       if (exists) return { url, probeKey: null };
     }
     // The oldest candidate is taken without a HEAD: one request less, and a GET
@@ -194,17 +194,17 @@ async function probeKeyFor(descriptor, url) {
     // entry does: data_processed moves when the data is rebuilt (`modified`
     // also moves on metadata-only edits, which would trigger pointless
     // multi-hundred-MB downloads, so it is deliberately not used).
-    const meta = await getJson(p.url);
+    const meta = await getJson(p.url, descriptor);
     const d = meta?.metas?.default || {};
     const key = [d.data_processed || '', d.records_count ?? ''].join('|');
     return key === '|' ? null : `ods:${key}`;
   }
 
   if (p.type === 'http-head') {
-    const res = await fetch(p.url || url, {
+    const res = await politeFetch(p.url || url, {
       method: 'HEAD',
       headers: { 'User-Agent': USER_AGENT, ...extraHeaders(descriptor) },
-    });
+    }, { descriptor });
     if (!res.ok) return null;
     const etag = res.headers.get('etag');
     const lastModified = res.headers.get('last-modified');
@@ -248,6 +248,7 @@ export default async function httpArtifact(descriptor, ctx = {}) {
   for (let attempt = 1; ; attempt++) {
     try {
       const got = await conditionalFetch(url, {
+        descriptor,
         validators: force ? null : held ? ctx.validators || held.validators : null,
         // Ask for the bytes exactly as published. Two reasons: (1) undici
         // transparently decompresses a gzipped response, which would make the

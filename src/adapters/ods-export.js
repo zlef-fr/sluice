@@ -23,6 +23,7 @@ export default async function odsExport(descriptor, ctx = {}) {
   }
 
   const { res, notModified, validators } = await conditionalFetch(url, {
+    descriptor,
     headers: { Accept: 'application/json', ...(descriptor.options.headers || {}) },
     validators: ctx.validators,
   });

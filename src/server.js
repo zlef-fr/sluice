@@ -18,6 +18,7 @@ import { SEED_SOURCES } from './seed.js';
 import { SEED_DASHBOARDS } from './seed-dashboards.js';
 import { loadDashboards, getDashboard, putDashboard, normalizeDashboard } from './dashboards.js';
 import { listSources } from './service.js';
+import { laneState } from './hostgate.js';
 
 import sourcesRouter from './routes/sources.js';
 import runsRouter from './routes/runs.js';
@@ -103,6 +104,10 @@ async function main() {
       service: 'sluice',
       sources: sources.length,
       feeds: sources.filter((s) => s.status.state === 'ok').map((s) => s.id),
+      // Upstreams currently being held back or cooled down (see hostgate.js).
+      // A refresh that takes 40 s because 23 siblings are queued in front of it
+      // is not a hung refresh, and there has to be somewhere that says so.
+      upstreams: laneState(),
     });
   });
 
