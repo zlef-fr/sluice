@@ -8,6 +8,7 @@ import { conditionalFetch } from './http.js';
 
 export default async function httpZipXml(descriptor, ctx = {}) {
   const { res, notModified, validators } = await conditionalFetch(descriptor.url, {
+    descriptor,
     headers: { ...(descriptor.options.headers || {}) },
     validators: ctx.validators,
   });

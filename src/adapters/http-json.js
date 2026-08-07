@@ -5,6 +5,7 @@ import { conditionalFetch } from './http.js';
 
 export default async function httpJson(descriptor, ctx = {}) {
   const { res, notModified, validators } = await conditionalFetch(descriptor.url, {
+    descriptor,
     headers: { Accept: 'application/json', ...(descriptor.options.headers || {}) },
     validators: ctx.validators,
   });
