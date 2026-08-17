@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { requireWrite, requireRead } from '../auth.js';
 import {
   listSources, getSource, registerSource, deleteSource, refreshNow, sourceHistory,
+  setSchedule,
 } from '../service.js';
 
 const router = Router();
@@ -32,6 +33,19 @@ router.put('/:id', requireWrite, async (req, res) => {
   const result = await registerSource({ ...req.body, id: req.params.id }, { owner });
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result.source);
+});
+
+// Re-schedule ONE source by hand: `{refresh: "7d"}`, `{refresh: "never"}` to
+// freeze it, or `{refresh: null}` to hand the schedule back to the descriptor.
+// The decision is kept OUTSIDE the descriptor, so the consumer re-registering on
+// its next build cannot undo it (see service.setSchedule).
+router.patch('/:id/schedule', requireWrite, async (req, res) => {
+  const body = req.body || {};
+  if (!('refresh' in body)) return res.status(400).json({ error: '`refresh` is required (a duration, "never", or null)' });
+  const r = await setSchedule(req.params.id, body.refresh);
+  if (!r) return res.status(404).json({ error: 'unknown source' });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r.source);
 });
 
 router.delete('/:id', requireWrite, async (req, res) => {

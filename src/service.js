@@ -2,7 +2,7 @@
 // behave identically. Thin wrappers over store + registry + fetcher + scheduler.
 import {
   allDescriptors, getDescriptor, getStatus, hasSource,
-  putDescriptor, removeSource, getFeed,
+  putDescriptor, removeSource, getFeed, getOverride, setOverride,
 } from './store.js';
 import { normalizeDescriptor } from './registry.js';
 import { refreshSource } from './fetcher.js';
@@ -27,6 +27,13 @@ export function summarize(descriptor) {
     refreshMs: descriptor.refreshMs,
     // A frozen data set is fetched once and then left alone (refresh: "never").
     frozen: !!descriptor.frozen,
+    // Who decided this interval. An operator's `setSchedule` outranks the
+    // descriptor a consumer registers, and the screen has to be able to say so —
+    // otherwise "24h" on a source frozen by hand looks like the freeze was lost.
+    refreshSetBy: getOverride(descriptor.id) ? 'operator' : 'descriptor',
+    // What the consumer's own descriptor asks for, kept so an override can be
+    // undone without the pipeline having to run again.
+    declaredRefresh: descriptor.declaredRefresh || descriptor.refresh,
     // When the timer fires next, and whether the data we hold has already
     // outlived the interval it promised (an upstream that 502s all night leaves
     // a green "ok" status pointing at yesterday's bytes).
@@ -104,14 +111,34 @@ export function getSource(id) {
 // (createdAt/owner are bookkeeping, not fetch inputs.)
 function sameFetchContract(a, b) {
   if (!a || !b) return false;
-  const strip = ({ createdAt, owner, ...rest }) => JSON.stringify(rest);
+  // declaredRefresh is bookkeeping (what the consumer asked for before an
+  // operator override), not a fetch input — counting it would make the first
+  // re-register after this feature shipped look like a changed contract and
+  // re-download the whole fleet.
+  const strip = ({ createdAt, owner, declaredRefresh, ...rest }) => JSON.stringify(rest);
   return strip(a) === strip(b);
 }
 
 // Register or update a source. Returns {ok, source} or {ok:false, error}.
 export async function registerSource(input, { owner } = {}) {
-  const norm = normalizeDescriptor(input, { owner });
+  let norm = normalizeDescriptor(input, { owner });
   if (!norm.ok) return norm;
+  // An operator's schedule decision outlives the pipeline: consumers re-register
+  // on every build, so without this a freeze would last until the next `npm run
+  // data` and then silently go back to hammering a dead upstream every 24 h.
+  const override = getOverride(norm.descriptor.id);
+  let overrodeToFrozen = false;
+  if (override) {
+    const declared = norm.descriptor.refresh;
+    const re = normalizeDescriptor({ ...input, id: norm.descriptor.id, refresh: override.refresh }, { owner });
+    if (re.ok) {
+      re.descriptor.declaredRefresh = declared;
+      norm = re;
+      overrodeToFrozen = !!re.descriptor.frozen;
+    }
+  } else {
+    delete norm.descriptor.declaredRefresh;
+  }
   const existing = getDescriptor(norm.descriptor.id);
   const st = getStatus(norm.descriptor.id);
   // Re-registering an identical descriptor is a no-op, not a reason to poke the
@@ -127,12 +154,46 @@ export async function registerSource(input, { owner } = {}) {
     : st?.status === 'ok' &&
       st.checkedAt &&
       Date.now() - new Date(st.checkedAt).getTime() < norm.descriptor.refreshMs;
-  const skipFetch = sameFetchContract(existing, norm.descriptor) && fresh;
+  // A source an operator froze BY HAND is never fetched by a re-registration,
+  // even one that has never succeeded: "leave this alone" is the whole point of
+  // the freeze, and the manual refresh button is the escape hatch.
+  const skipFetch = overrodeToFrozen || (sameFetchContract(existing, norm.descriptor) && fresh);
 
   await putDescriptor(norm.descriptor);
   scheduleSource(norm.descriptor);
   // Kick off the first fetch in the background; caller doesn't wait on upstream.
   if (!skipFetch) refreshSource(norm.descriptor, { trigger: 'register' });
+  return { ok: true, source: summarize(norm.descriptor) };
+}
+
+/**
+ * Change ONE source's schedule from the operator's side, without touching
+ * anything else about it: a new interval ("7d"), or "never" to FREEZE it — an
+ * archive capture, a closed data set, an upstream that is gone for good and
+ * whose nightly 503 is not news.
+ *
+ * `refresh: null` clears the override and hands the schedule back to whatever
+ * the consumer's descriptor declares.
+ *
+ * It never fetches. Re-scheduling is a decision about the FUTURE; an operator
+ * who also wants the bytes now has the refresh button two rows above.
+ */
+export async function setSchedule(id, refresh) {
+  const d = getDescriptor(id);
+  if (!d) return null;
+  const { declaredRefresh, ...base } = d;
+  const declared = declaredRefresh || d.refresh;
+  const wanted = refresh == null || refresh === '' ? declared : refresh;
+  const norm = normalizeDescriptor({ ...base, refresh: wanted });
+  if (!norm.ok) return norm;
+  const clearing = refresh == null || refresh === '';
+  if (!clearing) norm.descriptor.declaredRefresh = declared;
+  else delete norm.descriptor.declaredRefresh;
+  await setOverride(id, clearing ? null : { refresh: norm.descriptor.refresh, at: new Date().toISOString() });
+  await putDescriptor(norm.descriptor);
+  // scheduleSource() drops the timer of a frozen source and re-arms everyone
+  // else from now, so an interval shortened at 3 a.m. doesn't wait out the old one.
+  scheduleSource(norm.descriptor);
   return { ok: true, source: summarize(norm.descriptor) };
 }
 
