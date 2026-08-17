@@ -208,6 +208,7 @@ depends on them being present.
 | POST   | `/api/sources`                | write  | self-register (or update)        |
 | PUT    | `/api/sources/:id`            | write  | update by id                     |
 | DELETE | `/api/sources/:id`            | write  | remove                           |
+| PATCH  | `/api/sources/:id/schedule`   | write  | re-schedule by hand: `{refresh:"7d"}`, `{refresh:"never"}` to freeze, `{refresh:null}` to hand it back to the descriptor |
 | POST   | `/api/sources/:id/refresh`    | write  | force re-fetch (awaits); `?force=1` also skips not-modified shortcuts |
 | GET    | `/api/sources/:id/runs`       | read   | refresh history of one source + rolling stats |
 | GET    | `/api/runs`                   | read   | fleet refresh timeline (`?limit=&id=&failed=1`) |
@@ -488,6 +489,14 @@ A descriptor's `refresh` accepts a duration (`"6h"`, `"30d"`) or **`"never"`** �
 latter means the data set is closed: no timer is armed, re-registering it does not
 re-download it, and it is never counted as stale. Use it for anything that cannot
 change again; use a duration for anything a publisher may still re-issue.
+
+An operator can change that decision without editing the consumer's pipeline:
+`PATCH /api/sources/:id/schedule` (Forge › Sluice does it from the source's
+screen). The new interval is stored **outside** the descriptor, so the consumer
+re-registering on its next build cannot silently undo it — `GET /api/sources/:id`
+reports `refreshSetBy: "operator"` and keeps `declaredRefresh` so the override can
+be lifted later. Freezing this way also stops a re-registration from fetching:
+"leave this alone" is the point, and the manual refresh remains the escape hatch.
 
 ## License
 

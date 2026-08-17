@@ -13,6 +13,12 @@ import { versionId, isVersionId, removeArtifacts } from './artifacts.js';
 
 // id → descriptor
 const sources = new Map();
+// id → { refresh, at }  — an OPERATOR's schedule decision (see service.setSchedule).
+// Kept beside the registry rather than inside the descriptor because a consumer
+// re-registers its descriptor on every build: written into the descriptor, a
+// freeze would be overwritten by the next pipeline run and the button would be
+// a lie.
+const overrides = new Map();
 // id → { fetchedAt, status, error, itemCount, bytes, durationMs }  (status only)
 const status = new Map();
 // id → { data, meta }  (the warm in-memory payload; may be absent until loaded)
@@ -60,6 +66,9 @@ export async function loadRegistry() {
       sources.set(rec.id, rec.descriptor);
       if (rec.status) status.set(rec.id, rec.status);
     }
+    for (const [id, ov] of Object.entries(raw.overrides || {})) {
+      if (ov && ov.refresh) overrides.set(id, ov);
+    }
   } catch {
     /* first boot — no registry yet */
   }
@@ -74,6 +83,7 @@ function persistRegistry() {
         descriptor,
         status: status.get(id) || null,
       })),
+      overrides: Object.fromEntries(overrides),
     };
     return atomicWrite(SOURCES_FILE, JSON.stringify(out, null, 2));
   });
@@ -96,10 +106,22 @@ export async function putDescriptor(descriptor) {
   await persistRegistry();
 }
 
+// ── schedule overrides ──────────────────────────────────────────────────────
+export function getOverride(id) {
+  return overrides.get(id) || null;
+}
+
+/** `ov = null` drops the override, handing the schedule back to the descriptor. */
+export async function setOverride(id, ov) {
+  if (ov) overrides.set(id, ov); else overrides.delete(id);
+  await persistRegistry();
+}
+
 export async function removeSource(id) {
   sources.delete(id);
   status.delete(id);
   feeds.delete(id);
+  overrides.delete(id);
   await persistRegistry();
   try {
     await atomicWrite(feedFile(id), JSON.stringify({ removed: true }));

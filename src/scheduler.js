@@ -61,8 +61,13 @@ export function nextRunAt(id) {
 async function isStale(descriptor) {
   const st = getStatus(descriptor.id);
   const feed = await getFeed(descriptor.id);
+  // A frozen data set we already hold is done, WHATEVER its last check said. It
+  // matters for a source frozen by hand after its upstream went away (an archive
+  // capture now answering 503): the freeze exists to stop asking, and a boot that
+  // re-asked anyway would put the error straight back every restart.
+  if (descriptor.frozen) return !feed;
   if (!feed || !st || st.status !== 'ok' || !st.fetchedAt) return true;
-  if (descriptor.frozen || !descriptor.refreshMs) return false;
+  if (!descriptor.refreshMs) return false;
   const age = Date.now() - new Date(st.fetchedAt).getTime();
   return age > descriptor.refreshMs;
 }
