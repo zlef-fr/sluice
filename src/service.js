@@ -9,13 +9,14 @@ import { refreshSource } from './fetcher.js';
 import { scheduleSource, unschedule, nextRunAt } from './scheduler.js';
 import { sourceRuns, recentRuns, runStats, forgetRuns } from './runs.js';
 import { toGeoJson } from './geojson.js';
+import { isArtifactAdapter } from './adapters/index.js';
 
 // A compact, wire-safe view of a source (descriptor sans internals + status).
 export function summarize(descriptor) {
   const st = getStatus(descriptor.id);
   // A file source ("artifact") is consumed as bytes from /api/artifact; a record
   // source is consumed as JSON from /api/feed. Both keep version history.
-  const isArtifact = descriptor.adapter === 'http-artifact';
+  const isArtifact = isArtifactAdapter(descriptor.adapter);
   return {
     id: descriptor.id,
     kind: isArtifact ? 'artifact' : 'records',
