@@ -132,6 +132,7 @@ A **source descriptor** is the contract you register:
 | `sncf-lost`     | SNCF lost-property ODS dataset, aggregated inline (avoids the 1.5M-row raw table) |
 | `http-artifact` | keeps the **file itself**, versioned, instead of parsing records — for build inputs (zip dumps, hundred-MB bulk exports). See [File artifacts](#file-artifacts). |
 | `hubeau-paginated` | walks Hub'Eau's cursor pagination to the end and stores the whole result set as one CSV/NDJSON artifact. **Refuses to emit a short read**: Hub'Eau caps a response at `size` rows and truncates in silence, so the adapter asserts the row count against the `count` the API declared. See [Hub'Eau](#hubeau). |
+| `tpdb-performers` | walks ThePornDB's scene index studio by studio and stores who performed for whom (per-studio scene counts, canonical profiles, images, Wikidata links) as one NDJSON artifact. Re-walks by release year when the index's silent 10 000 cap is hit, and asserts every slice's scene count. Token read from the environment, never the descriptor. See [ThePornDB](#theporndb). |
 
 Adapters live in `src/adapters/` and return raw records; drop a new file in that
 folder and register it in `src/adapters/index.js` to add your own. The
@@ -433,6 +434,51 @@ There is deliberately **no probe**: these endpoints emit no ETag, and `count` al
 would miss a corrected value. The file is downloaded each refresh and its sha256
 decides whether a new version is minted — one download per interval, for the whole
 fleet, which is the trade Sluice exists to make.
+
+## ThePornDB
+
+`api.theporndb.net` indexes adult studios, their scenes and the performers credited in
+them. The obvious endpoint for "who worked for studio X", `/performer-sites?site_id=`,
+lists the studio's own model pages and is **sparse in a way that looks like data**:
+Blacked, Deeper and Tushy Raw report zero performers there while their scenes credit
+hundreds. `tpdb-performers` walks `/scenes` instead: every scene carries its credited
+performers with their canonical profile inlined, so one walk yields membership, a
+per-studio scene count and the profile, with no per-performer request.
+
+Two traps shape the walk. The search index **caps `meta.total` at 10 000 and stops
+paginating there without an error**, so a collection that reports the cap is re-walked
+one release year at a time (a year that still hits the cap raises). And pages are read
+`former_created`, oldest first, so a scene added mid-walk lands after the last page
+instead of shifting every page; each slice then asserts that the distinct scenes seen
+equal the declared total.
+
+```json
+{
+  "id": "tpdb-performers-xpack",
+  "adapter": "tpdb-performers",
+  "url": "https://api.theporndb.net",
+  "options": {
+    "collections": [
+      { "key": "vixen", "siteId": 3372 },
+      { "key": "brazzers", "siteId": 92, "op": "Site/Parent" }
+    ],
+    "genders": ["Female"],
+    "hostGapMs": 400
+  },
+  "refresh": "7d"
+}
+```
+
+`options`: `collections` (`[{ key, siteId, op? }]`, `op` = TPDB `site_operation`,
+default `Site`), `genders` (default `["Female"]`), `tokenEnv` (default `TPDB_TOKEN`:
+the API needs a token and descriptors are served publicly, so it lives in Sluice's
+environment), `fromYear` (year-split start, default 1970), `filename`, `timeoutMs`,
+`hostGapMs`, `compress`, `keep`.
+
+Output: one `{"type":"collection",…}` line per collection (name, network, logo, scene
+and performer counts), then one `{"type":"performer",…}` line per performer, sorted by
+slug so an unchanged upstream hashes the same. Studio bios are marketing copy and are
+**not** carried over.
 
 ## Caching & upstream politeness
 

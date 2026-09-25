@@ -21,11 +21,14 @@ const RATE_LIMIT_ATTEMPTS = Number(process.env.SLUICE_RATE_LIMIT_ATTEMPTS || 6);
  * response earns. Everything else — including a 404 or a 500 — is handed back
  * untouched: only the answers that mean "you, later" are worth waiting out.
  */
-export async function politeFetch(url, init = {}, { descriptor = null, gapMs } = {}) {
+export async function politeFetch(url, init = {}, { descriptor = null, gapMs, timeoutMs } = {}) {
   const gap = gapMs ?? gapFor(descriptor);
   for (let attempt = 1; ; attempt++) {
     const host = await waitTurn(url, { gapMs: gap });
-    const res = await fetch(url, init);
+    // The timeout starts once the lane lets us through. A signal made by the caller
+    // would already be running while we queue behind a cooldown, and a five-minute
+    // cooldown would abort the request before it was ever sent.
+    const res = await fetch(url, timeoutMs ? { ...init, signal: AbortSignal.timeout(timeoutMs) } : init);
     noteResponse(host, res, { gapMs: gap });
     if (res.status !== 429 && res.status !== 503) return res;
     if (attempt >= RATE_LIMIT_ATTEMPTS) return res;

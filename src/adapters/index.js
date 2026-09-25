@@ -10,6 +10,7 @@ import dvfGeo from './dvf-geo.js';
 import melodiIpc from './melodi-ipc.js';
 import sncfLost from './sncf-lost.js';
 import hubeauPaginated from './hubeau-paginated.js';
+import tpdbPerformers from './tpdb-performers.js';
 
 const ADAPTERS = {
   'http-json': httpJson,
@@ -21,6 +22,7 @@ const ADAPTERS = {
   'melodi-ipc': melodiIpc,
   'sncf-lost': sncfLost,
   'hubeau-paginated': hubeauPaginated,
+  'tpdb-performers': tpdbPerformers,
 };
 
 export function hasAdapter(name) {
@@ -29,6 +31,13 @@ export function hasAdapter(name) {
 
 export function getAdapter(name) {
   return ADAPTERS[name] || null;
+}
+
+// Adapters whose output is a FILE (served from /api/artifact) rather than records.
+const ARTIFACT_ADAPTERS = new Set(['http-artifact', 'hubeau-paginated', 'tpdb-performers']);
+
+export function isArtifactAdapter(name) {
+  return ARTIFACT_ADAPTERS.has(name);
 }
 
 export function adapterNames() {
