@@ -20,8 +20,10 @@
 //      raises rather than ship a truncated roster.
 //   2. Pages are ordered `former_created` (oldest record first), so a scene added
 //      upstream mid-walk lands after the last page instead of shifting every page by
-//      one. Each slice then asserts that the number of distinct scenes seen equals
-//      the total the API declared on its first page. A short read raises.
+//      one. Ties are not sorted deterministically, though, so a slice can come back
+//      with one scene twice and another missing; a short slice is re-walked in other
+//      orders and unioned. Only a slice still short of the declared total after every
+//      order raises.
 //
 // Scenes the index holds without a release date cannot be reached by a year slice;
 // for a capped collection their number is unknowable, and the log says so.
@@ -55,6 +57,12 @@ import { politeFetch } from './http.js';
 
 const API_HOST = 'api.theporndb.net';
 const INDEX_CAP = 10000;
+// Walk orders, tried in turn when a slice comes back short (see walk()). The first
+// is oldest-first so a scene added mid-walk lands after the last page.
+// Share of a slice that may be declared but never served before the walk is
+// considered broken rather than the upstream hiding a few rows.
+const MAX_HIDDEN_SHARE = 0.02;
+const ORDERS = ['former_created', 'recently_created', 'former_released', 'recently_released'];
 const PER_PAGE = 100;
 
 function yearOf(date) {
@@ -166,6 +174,7 @@ export default async function tpdbPerformers(descriptor) {
   const filename = opts.filename || 'tpdb-performers.ndjson';
 
   const performers = new Map(); // parent uuid → profile
+  let hidden = 0; // declared by the API, served in no order
   const collectionRows = [];
   let requests = 0;
   const get = (url) => {
@@ -179,52 +188,81 @@ export default async function tpdbPerformers(descriptor) {
     const sceneIds = new Set();
     const members = new Set();
 
-    const sliceUrl = (year, page) =>
+    const sliceUrl = (year, page, order = ORDERS[0]) =>
       `${base}/scenes?site_id=${c.siteId}&site_operation=${encodeURIComponent(op)}` +
-      `&orderBy=former_created&per_page=${PER_PAGE}&page=${page}` + (year ? `&year=${year}` : '');
+      `&orderBy=${order}&per_page=${PER_PAGE}&page=${page}` + (year ? `&year=${year}` : '');
 
     // Walk one slice to the end and prove it came back whole.
+    // `meta.total` is not a promise of rows. Two ways the rows fall short of it:
+    //   - ties are not sorted deterministically, so two scenes created in the same
+    //     second can swap between two page requests: one is served twice, the other
+    //     never. Walking again in another order finds it.
+    //   - the total counts scenes the API then does not serve at all (Reality Kings
+    //     2025: 299 declared, the same 295 in every order). No order finds those.
+    // So a short slice is re-walked in other orders and unioned until an order adds
+    // nothing new. What is still missing then is reported, and it raises if it is
+    // more than a sliver of the slice: that would be a broken walk, not hidden rows.
     const walk = async (year, first) => {
       const declared = first.meta?.total ?? 0;
       const pages = Math.ceil(declared / PER_PAGE);
       const seen = new Set();
-      for (let page = 1; page <= pages; page++) {
-        const body = page === 1 ? first : await get(sliceUrl(year, page));
-        for (const scene of body.data || []) {
-          seen.add(scene.id);
-          if (sceneIds.has(scene.id)) continue;
-          sceneIds.add(scene.id);
-          const y = yearOf(scene.date);
-          const credited = new Set();
-          for (const p of scene.performers || []) {
-            const parent = p.parent;
-            // A credit with no canonical profile has no gender to check and no
-            // identity to merge on; it cannot be attributed, so it is skipped.
-            if (!parent || !parent.id || credited.has(parent.id)) continue;
-            credited.add(parent.id);
-            if (!genders.has(parent.extras?.gender)) continue;
-            let rec = performers.get(parent.id);
-            if (!rec) {
-              rec = profile(parent);
-              performers.set(parent.id, rec);
-            }
-            const stat = (rec.collections[c.key] ||= { scenes: 0, first: null, last: null });
-            stat.scenes += 1;
-            if (y) {
-              stat.first = stat.first ? Math.min(stat.first, y) : y;
-              stat.last = stat.last ? Math.max(stat.last, y) : y;
-            }
-            members.add(parent.id);
+      const label = `${c.key}${year ? ` ${year}` : ''}`;
+      let stable = false;
+      for (const order of ORDERS) {
+        const before = seen.size;
+        for (let page = 1; page <= pages; page++) {
+          const body = page === 1 && order === ORDERS[0] ? first : await get(sliceUrl(year, page, order));
+          absorb(body, seen);
+        }
+        if (seen.size >= declared) break;
+        if (order !== ORDERS[0] && seen.size === before) {
+          stable = true;
+          break;
+        }
+        console.log(`[sluice] tpdb-performers: ${label}: ${seen.size}/${declared} after ${order}, re-walking`);
+      }
+      const missing = declared - seen.size;
+      if (missing > 0) {
+        if (!stable || missing > Math.max(2, declared * MAX_HIDDEN_SHARE)) {
+          throw new Error(
+            `tpdb-performers: ${label}: API declared ${declared} scenes, ${seen.size} distinct came back ` +
+              `(${stable ? 'stable across orders' : 'still changing after every order'})`,
+          );
+        }
+        console.log(`[sluice] tpdb-performers: ${label}: ${missing} declared scene(s) are not served by the API in any order`);
+        hidden += missing;
+      }
+      return seen.size;
+    };
+
+    const absorb = (body, seen) => {
+      for (const scene of body.data || []) {
+        seen.add(scene.id);
+        if (sceneIds.has(scene.id)) continue;
+        sceneIds.add(scene.id);
+        const y = yearOf(scene.date);
+        const credited = new Set();
+        for (const p of scene.performers || []) {
+          const parent = p.parent;
+          // A credit with no canonical profile has no gender to check and no
+          // identity to merge on; it cannot be attributed, so it is skipped.
+          if (!parent || !parent.id || credited.has(parent.id)) continue;
+          credited.add(parent.id);
+          if (!genders.has(parent.extras?.gender)) continue;
+          let rec = performers.get(parent.id);
+          if (!rec) {
+            rec = profile(parent);
+            performers.set(parent.id, rec);
           }
+          const stat = (rec.collections[c.key] ||= { scenes: 0, first: null, last: null });
+          stat.scenes += 1;
+          if (y) {
+            stat.first = stat.first ? Math.min(stat.first, y) : y;
+            stat.last = stat.last ? Math.max(stat.last, y) : y;
+          }
+          members.add(parent.id);
         }
       }
-      if (seen.size !== declared) {
-        throw new Error(
-          `tpdb-performers: ${c.key}${year ? ` ${year}` : ''}: API declared ${declared} scenes, ` +
-            `${seen.size} distinct came back over ${pages} page(s)`,
-        );
-      }
-      return declared;
     };
 
     const whole = await get(sliceUrl(null, 1));
@@ -295,7 +333,7 @@ export default async function tpdbPerformers(descriptor) {
   });
   console.log(
     `[sluice] tpdb-performers: ${collectionRows.length} collection(s), ${rows.length} performer(s), ` +
-      `${requests} request(s)`,
+      `${requests} request(s), ${hidden} declared scene(s) never served`,
   );
 
   const held = await latestRecord(descriptor.id).catch(() => null);
