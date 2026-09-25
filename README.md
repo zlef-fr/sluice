@@ -472,7 +472,9 @@ equal the declared total.
 `options`: `collections` (`[{ key, siteId, op? }]`, `op` = TPDB `site_operation`,
 default `Site`), `genders` (default `["Female"]`), `tokenEnv` (default `TPDB_TOKEN`:
 the API needs a token and descriptors are served publicly, so it lives in Sluice's
-environment), `fromYear` (year-split start, default 1970), `filename`, `timeoutMs`,
+environment; only `TPDB_*` names are accepted and `url` must be
+`https://api.theporndb.net`, because the token rides on every request and a
+descriptor must not be able to redirect it or pick another secret), `fromYear` (year-split start, default 1970), `filename`, `timeoutMs`,
 `hostGapMs`, `compress`, `keep`.
 
 Output: one `{"type":"collection",…}` line per collection (name, network, logo, scene

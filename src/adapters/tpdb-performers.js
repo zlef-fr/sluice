@@ -34,6 +34,11 @@
 //     genders      performer genders to keep (default ['Female'])
 //     tokenEnv     env var holding the API token (default 'TPDB_TOKEN'). The token
 //                  never sits in the descriptor: descriptors are served publicly.
+//                  Only names matching TPDB_* are accepted, and the url must be
+//                  https://api.theporndb.net: the adapter attaches a bearer token to
+//                  every request it makes, so letting a descriptor choose either the
+//                  destination or the variable would let anyone holding the write
+//                  token mail Sluice's secrets to a server of their choosing.
 //     fromYear     first year of a year split (default 1970)
 //     filename     default 'tpdb-performers.ndjson'
 //     timeoutMs    per request (default 60000)
@@ -48,6 +53,7 @@ import { USER_AGENT } from '../config.js';
 import { latestRecord, streamToStaging } from '../artifacts.js';
 import { politeFetch } from './http.js';
 
+const API_HOST = 'api.theporndb.net';
 const INDEX_CAP = 10000;
 const PER_PAGE = 100;
 
@@ -122,8 +128,22 @@ function profile(parent) {
 
 export default async function tpdbPerformers(descriptor) {
   const opts = descriptor.options || {};
-  const base = String(descriptor.url || '').replace(/\/+$/, '');
-  if (!base) throw new Error('tpdb-performers needs a url (the API base)');
+  const given = String(descriptor.url || '').replace(/\/+$/, '');
+  if (!given) throw new Error('tpdb-performers needs a url (the API base)');
+  let parsed;
+  try {
+    parsed = new URL(given);
+  } catch {
+    throw new Error(`tpdb-performers: url is not a URL (${given})`);
+  }
+  if (
+    parsed.protocol !== 'https:' || parsed.host !== API_HOST || parsed.username || parsed.password ||
+    (parsed.pathname && parsed.pathname !== '/') || parsed.search || parsed.hash
+  ) {
+    throw new Error(`tpdb-performers: url must be https://${API_HOST} (the token is sent to it)`);
+  }
+  // Every request is built from the constant, never from the descriptor's string.
+  const base = `https://${API_HOST}`;
   const collections = Array.isArray(opts.collections) ? opts.collections : [];
   if (!collections.length) throw new Error('tpdb-performers: options.collections is empty');
   const keys = new Set();
@@ -135,6 +155,9 @@ export default async function tpdbPerformers(descriptor) {
     keys.add(c.key);
   }
   const tokenEnv = opts.tokenEnv || 'TPDB_TOKEN';
+  if (!/^TPDB_[A-Z0-9_]+$/.test(tokenEnv)) {
+    throw new Error(`tpdb-performers: tokenEnv must name a TPDB_* variable (got ${JSON.stringify(tokenEnv)})`);
+  }
   const token = process.env[tokenEnv];
   if (!token) throw new Error(`tpdb-performers: env ${tokenEnv} is not set`);
   const genders = new Set(Array.isArray(opts.genders) && opts.genders.length ? opts.genders : ['Female']);
