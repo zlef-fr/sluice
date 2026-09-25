@@ -449,8 +449,11 @@ Two traps shape the walk. The search index **caps `meta.total` at 10 000 and sto
 paginating there without an error**, so a collection that reports the cap is re-walked
 one release year at a time (a year that still hits the cap raises). And pages are read
 `former_created`, oldest first, so a scene added mid-walk lands after the last page
-instead of shifting every page; each slice then asserts that the distinct scenes seen
-equal the declared total.
+instead of shifting every page. `meta.total` still overstates the rows in two ways:
+ties are not sorted deterministically (a scene can be served twice and another never),
+and the total counts scenes the API never serves. A short slice is re-walked in other
+orders and unioned until an order adds nothing; what is still missing is logged, and
+raises if it exceeds 2 % of the slice.
 
 ```json
 {
